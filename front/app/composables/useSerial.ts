@@ -153,6 +153,14 @@ export function useSerial() {
     return write(cmd);
   }
 
+  // Send full scene (array of channel values)
+  async function sendScene(channelValues: number[]) {
+    // Protocol: "S<v1>,<v2>,...<vN>\n"
+    const values = channelValues.map(v => Math.min(255, Math.max(0, Math.round(v))));
+    const cmd = `S${values.join(',')}\n`;
+    return write(cmd);
+  }
+
   return {
     // State
     isSupported,
@@ -166,5 +174,6 @@ export function useSerial() {
     write,
     sendDMX,
     sendBeat,
+    sendScene,
   };
 }

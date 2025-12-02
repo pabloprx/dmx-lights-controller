@@ -30,241 +30,117 @@ watch(
 </script>
 
 <template>
-  <div class="container">
-    <h1>DMX Controller</h1>
+  <div class="max-w-xl mx-auto p-5 font-mono text-white bg-black min-h-screen">
+    <h1 class="text-center mb-5">DMX Controller</h1>
+
+    <NuxtLink
+      to="/controller"
+      class="block w-full p-3 text-center no-underline mb-5 bg-cyan-400 text-black font-mono"
+    >
+      Open Controller UI →
+    </NuxtLink>
 
     <!-- Big Beat Number - RED when playing -->
-    <div class="beat-box" :class="{ active: linkState.isPlaying }">
+    <div
+      class="w-48 h-48 mx-auto mb-5 flex items-center justify-center text-8xl font-bold"
+      :class="linkState.isPlaying ? 'bg-red-600 text-white' : 'bg-neutral-800 text-neutral-600'"
+    >
       {{ linkState.isPlaying ? linkState.beatInBar : '-' }}
     </div>
 
     <!-- Raw WS Data Table -->
-    <section class="panel">
-      <h2>Ableton Link (Raw WS)</h2>
-      <table class="data-table">
-        <tr>
-          <td>WS Connected</td>
-          <td :class="linkConnected ? 'green' : 'red'">{{ linkConnected }}</td>
-        </tr>
-        <tr>
-          <td>enabled</td>
-          <td>{{ linkState.enabled }}</td>
-        </tr>
-        <tr>
-          <td>isPlaying</td>
-          <td :class="linkState.isPlaying ? 'green' : 'red'">{{ linkState.isPlaying }}</td>
-        </tr>
-        <tr>
-          <td>numPeers</td>
-          <td>{{ linkState.numPeers }}</td>
-        </tr>
-        <tr>
-          <td>tempo</td>
-          <td>{{ linkState.tempo.toFixed(2) }} BPM</td>
-        </tr>
-        <tr>
-          <td>beat</td>
-          <td>{{ linkState.beat.toFixed(3) }}</td>
-        </tr>
-        <tr>
-          <td>phase</td>
-          <td>{{ linkState.phase.toFixed(3) }}</td>
-        </tr>
-        <tr>
-          <td>beatInBar</td>
-          <td class="big">{{ linkState.beatInBar }}</td>
-        </tr>
-        <tr>
-          <td>quantum</td>
-          <td>{{ linkState.quantum }}</td>
-        </tr>
-        <tr>
-          <td>lastBeatTime</td>
-          <td>{{ linkState.lastBeatTime }}</td>
-        </tr>
+    <section class="bg-neutral-900 border border-neutral-700 p-4 mb-4">
+      <h2 class="m-0 mb-2 text-sm text-neutral-500">Ableton Link (Raw WS)</h2>
+      <table class="w-full text-sm border-collapse">
+        <tbody>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">WS Connected</td>
+            <td class="py-1.5 px-2 text-right font-mono" :class="linkConnected ? 'text-green-500' : 'text-red-500'">{{ linkConnected }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">enabled</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.enabled }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">isPlaying</td>
+            <td class="py-1.5 px-2 text-right font-mono" :class="linkState.isPlaying ? 'text-green-500' : 'text-red-500'">{{ linkState.isPlaying }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">numPeers</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.numPeers }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">tempo</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.tempo.toFixed(2) }} BPM</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">beat</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.beat.toFixed(3) }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">phase</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.phase.toFixed(3) }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">beatInBar</td>
+            <td class="py-1.5 px-2 text-right font-mono text-2xl font-bold">{{ linkState.beatInBar }}</td>
+          </tr>
+          <tr class="border-b border-neutral-800">
+            <td class="py-1.5 px-2 text-neutral-500">quantum</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.quantum }}</td>
+          </tr>
+          <tr>
+            <td class="py-1.5 px-2 text-neutral-500">lastBeatTime</td>
+            <td class="py-1.5 px-2 text-right font-mono">{{ linkState.lastBeatTime }}</td>
+          </tr>
+        </tbody>
       </table>
     </section>
 
     <!-- Serial Connection -->
-    <section class="panel">
-      <h2>Arduino / ESP32</h2>
+    <section class="bg-neutral-900 border border-neutral-700 p-4 mb-4">
+      <h2 class="m-0 mb-2 text-sm text-neutral-500">Arduino / ESP32</h2>
 
-      <div v-if="!serialSupported" class="warning">
+      <div v-if="!serialSupported" class="bg-yellow-900/50 text-yellow-500 p-2.5 text-center">
         Web Serial API not supported. Use Chrome or Edge.
       </div>
 
       <div v-else>
-        <table class="data-table">
-          <tr>
-            <td>Status</td>
-            <td :class="serialConnected ? 'green' : 'red'">
-              {{ serialConnected ? "Connected" : "Disconnected" }}
-            </td>
-          </tr>
+        <table class="w-full text-sm border-collapse">
+          <tbody>
+            <tr>
+              <td class="py-1.5 px-2 text-neutral-500">Status</td>
+              <td class="py-1.5 px-2 text-right font-mono" :class="serialConnected ? 'text-green-500' : 'text-red-500'">
+                {{ serialConnected ? "Connected" : "Disconnected" }}
+              </td>
+            </tr>
+          </tbody>
         </table>
 
-        <div v-if="serialError" class="error-msg">{{ serialError }}</div>
+        <div v-if="serialError" class="text-red-500 my-2.5">{{ serialError }}</div>
 
         <button
           v-if="!serialConnected"
-          class="btn"
+          class="w-full p-3 border-none font-mono text-sm cursor-pointer bg-green-500 text-black mt-2.5 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:cursor-not-allowed"
           :disabled="serialConnecting"
           @click="connectSerial()"
         >
           {{ serialConnecting ? "Connecting..." : "Connect Serial" }}
         </button>
 
-        <button v-else class="btn btn-off" @click="disconnectSerial()">
+        <button
+          v-else
+          class="w-full p-3 border-none font-mono text-sm cursor-pointer bg-neutral-700 text-white mt-2.5"
+          @click="disconnectSerial()"
+        >
           Disconnect
         </button>
 
-        <div v-if="serialConnected && receivedData" class="serial-log">
-          <div class="label">Arduino Output:</div>
-          <pre>{{ receivedData }}</pre>
+        <div v-if="serialConnected && receivedData" class="mt-2.5">
+          <div class="text-neutral-500 mb-1">Arduino Output:</div>
+          <pre class="bg-black border border-neutral-700 p-2.5 text-xs max-h-24 overflow-y-auto whitespace-pre-wrap break-all m-0">{{ receivedData }}</pre>
         </div>
       </div>
     </section>
   </div>
 </template>
-
-<style scoped>
-* {
-  transition: none !important;
-  animation: none !important;
-}
-
-.container {
-  max-width: 600px;
-  margin: 0 auto;
-  padding: 20px;
-  font-family: monospace;
-  color: #fff;
-  background: #000;
-  min-height: 100vh;
-}
-
-h1 {
-  text-align: center;
-  margin-bottom: 20px;
-}
-
-h2 {
-  margin: 0 0 10px;
-  font-size: 14px;
-  color: #888;
-}
-
-.beat-box {
-  width: 200px;
-  height: 200px;
-  margin: 0 auto 20px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 120px;
-  font-weight: bold;
-  background: #222;
-  color: #444;
-}
-
-.beat-box.active {
-  background: #f00;
-  color: #fff;
-}
-
-.panel {
-  background: #111;
-  border: 1px solid #333;
-  padding: 15px;
-  margin-bottom: 15px;
-}
-
-.data-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 14px;
-}
-
-.data-table td {
-  padding: 6px 8px;
-  border-bottom: 1px solid #222;
-}
-
-.data-table td:first-child {
-  color: #888;
-}
-
-.data-table td:last-child {
-  text-align: right;
-  font-family: monospace;
-}
-
-.big {
-  font-size: 24px;
-  font-weight: bold;
-}
-
-.green {
-  color: #0f0;
-}
-
-.red {
-  color: #f00;
-}
-
-.btn {
-  width: 100%;
-  padding: 12px;
-  border: none;
-  font-family: monospace;
-  font-size: 14px;
-  cursor: pointer;
-  background: #0f0;
-  color: #000;
-  margin-top: 10px;
-}
-
-.btn:disabled {
-  background: #333;
-  color: #666;
-  cursor: not-allowed;
-}
-
-.btn-off {
-  background: #333;
-  color: #fff;
-}
-
-.warning {
-  background: #330;
-  color: #fa0;
-  padding: 10px;
-  text-align: center;
-}
-
-.error-msg {
-  color: #f00;
-  margin: 10px 0;
-}
-
-.serial-log {
-  margin-top: 10px;
-}
-
-.serial-log .label {
-  color: #888;
-  margin-bottom: 5px;
-}
-
-.serial-log pre {
-  background: #000;
-  border: 1px solid #333;
-  padding: 10px;
-  font-size: 12px;
-  max-height: 100px;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  word-break: break-all;
-  margin: 0;
-}
-</style>
