@@ -1,10 +1,16 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
 import { useSetPlayer } from '~/composables/useSetPlayer'
+import { useClipDrag } from '~/composables/useClipDrag'
 import { TRACK_COLORS } from '~/types/dmx'
+import type { SetClip } from '~/types/dmx'
 
 const store = useDMXStore()
 const player = useSetPlayer()
+const clipDrag = useClipDrag()
+
+// Beat cell width for drag calculations
+const BEAT_WIDTH = 60
 
 // Create first set if none exists
 onMounted(() => {
@@ -96,6 +102,36 @@ function isBeatCovered(trackId: string, beat: number) {
   return currentSet.value.clips.some(
     c => c.trackId === trackId && beat > c.startBeat && beat < c.startBeat + c.duration
   )
+}
+
+// Handle clip mousedown for drag
+function handleClipMouseDown(event: MouseEvent, clip: SetClip) {
+  const target = event.currentTarget as HTMLElement
+  const mode = clipDrag.getClipCursor(event, target)
+  clipDrag.startDrag(clip, mode, event, BEAT_WIDTH)
+}
+
+// Get cursor style for clip
+function getClipCursorStyle(clip: SetClip) {
+  if (clipDrag.isDragging.value && clipDrag.dragState.value?.clipId === clip.id) {
+    const mode = clipDrag.dragState.value.mode
+    if (mode === 'resize-start' || mode === 'resize-end') {
+      return 'ew-resize'
+    }
+    return 'grabbing'
+  }
+  return 'grab'
+}
+
+// Handle clip mousemove for cursor preview
+function handleClipMouseMove(event: MouseEvent) {
+  const target = event.currentTarget as HTMLElement
+  const mode = clipDrag.getClipCursor(event, target)
+  if (mode === 'resize-start' || mode === 'resize-end') {
+    target.style.cursor = 'ew-resize'
+  } else {
+    target.style.cursor = 'grab'
+  }
 }
 </script>
 
@@ -211,14 +247,21 @@ function isBeatCovered(trackId: string, beat: number) {
               <div
                 v-if="getClipAtBeat(track.id, beat)"
                 class="clip"
+                :class="{ dragging: clipDrag.isDragging.value && clipDrag.dragState.value?.clipId === getClipAtBeat(track.id, beat)!.id }"
                 :style="{
                   backgroundColor: getClipColor(getClipAtBeat(track.id, beat)!.presetId),
                   width: `calc(${getClipAtBeat(track.id, beat)!.duration * 100}% - 4px)`,
+                  cursor: getClipCursorStyle(getClipAtBeat(track.id, beat)!),
                 }"
+                @mousedown.stop="handleClipMouseDown($event, getClipAtBeat(track.id, beat)!)"
+                @mousemove="handleClipMouseMove($event)"
               >
                 <span class="clip-name">
                   {{ store.getPreset(getClipAtBeat(track.id, beat)!.presetId)?.name }}
                 </span>
+                <!-- Resize handles -->
+                <div class="resize-handle resize-handle-start" />
+                <div class="resize-handle resize-handle-end" />
               </div>
             </div>
           </div>
@@ -615,6 +658,18 @@ function isBeatCovered(trackId: string, beat: number) {
   padding: 0 6px;
   overflow: hidden;
   z-index: 5;
+  transition: transform 0.05s ease, box-shadow 0.1s ease;
+  user-select: none;
+}
+
+.clip:hover {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.clip.dragging {
+  transform: scale(1.02);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  z-index: 10;
 }
 
 .clip-name {
@@ -625,6 +680,30 @@ function isBeatCovered(trackId: string, beat: number) {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  pointer-events: none;
+}
+
+/* Resize Handles */
+.resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 8px;
+  cursor: ew-resize;
+}
+
+.resize-handle-start {
+  left: 0;
+  border-radius: 4px 0 0 4px;
+}
+
+.resize-handle-end {
+  right: 0;
+  border-radius: 0 4px 4px 0;
+}
+
+.resize-handle:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 /* Add Track */
