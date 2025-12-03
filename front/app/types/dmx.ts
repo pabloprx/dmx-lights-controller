@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// FIXTURE PROFILE (device template)
+// DEVICE PROFILE (template for a type of fixture)
 // ═══════════════════════════════════════════════════════════════
 export interface ChannelDefinition {
   offset: number
@@ -10,7 +10,7 @@ export interface ChannelDefinition {
   defaultValue: number
 }
 
-export interface FixtureProfile {
+export interface DeviceProfile {
   id: string
   name: string
   channelCount: number
@@ -18,22 +18,33 @@ export interface FixtureProfile {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FIXTURE (physical device instance)
+// DEVICE (physical fixture instance - simplified from old Fixture)
 // ═══════════════════════════════════════════════════════════════
-export interface Fixture {
+export interface Device {
   id: string
-  name: string
-  profileId: string
-  startChannel: number
-  tags: string[]
+  name: string                    // e.g., "Pinspot 1"
+  profileId: string               // Reference to DeviceProfile
+  startChannel: number            // DMX address (1-512)
+  tags: string[]                  // For filtering/organization
 }
 
 // ═══════════════════════════════════════════════════════════════
-// FIXTURE VALUES (channel values for a fixture)
+// GROUP (collection of devices that act together)
+// ═══════════════════════════════════════════════════════════════
+export interface Group {
+  id: string
+  name: string                    // e.g., "Left Lights", "Red Strobes"
+  profileId: string               // All devices MUST share same profile
+  deviceIds: string[]             // Devices in this group
+  color: string                   // UI color for track identification
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PRESET VALUES (channel values configuration)
 // ═══════════════════════════════════════════════════════════════
 export type StrobeSpeed = 'slow' | 'medium' | 'fast'
 
-export interface FixtureValues {
+export interface PresetValues {
   dimmer: number                  // 0-255 (maps to 9-134 for pinspot)
   strobe: boolean                 // Strobe mode on/off
   strobeSpeed: StrobeSpeed        // When strobe=true
@@ -44,39 +55,86 @@ export interface FixtureValues {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// PRESET (saved look for ONE fixture)
+// PRESET (profile-linked, shared across devices of same type)
 // ═══════════════════════════════════════════════════════════════
+export type PresetCategory = 'color' | 'strobe' | 'dimmer' | 'custom'
+
 export interface Preset {
   id: string
   name: string
-  fixtureId: string
-  values: FixtureValues
+  profileId: string               // Linked to PROFILE, not device
+  values: PresetValues
+  isBuiltIn: boolean              // System presets vs user-created
+  category: PresetCategory
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SCENE (stack of presets = all fixtures at one moment)
+// SCENE (static frame - group/device + preset assignments)
 // ═══════════════════════════════════════════════════════════════
+export interface SceneAssignment {
+  targetType: 'device' | 'group'
+  targetId: string                // deviceId or groupId
+  presetId: string
+}
+
 export interface Scene {
   id: string
   name: string
-  presetIds: string[]             // Presets to stack (one per fixture max)
+  assignments: SceneAssignment[]  // Which devices/groups get which presets
 }
 
 // ═══════════════════════════════════════════════════════════════
-// BANK (timed grid of scenes)
+// SET (FL Playlist-style: tracks × time) - replaces Bank
 // ═══════════════════════════════════════════════════════════════
-export interface Bank {
+export type SetLength = 1 | 2 | 4 | 8 | 16 | 32
+
+export interface SetTrack {
+  id: string
+  name: string                    // e.g., "Left Lights", "Lazer"
+  targetType: 'device' | 'group'
+  targetId: string                // deviceId or groupId
+  color: string                   // Track color for UI
+  muted: boolean
+  solo: boolean
+}
+
+export interface SetClip {
+  id: string
+  trackId: string
+  presetId: string                // The preset to apply
+  startBeat: number               // Position in beats (0-indexed)
+  duration: number                // Length in beats
+  // Future: fadeIn, fadeOut, endPresetId
+}
+
+export interface Set {
   id: string
   name: string
-  length: number                  // Total beats: 2, 4, 8, 16
-  unitDuration: number            // Beat per cell: 1, 0.5, 0.25
-  cells: (string | null)[]        // Scene ID or null for each cell
+  length: SetLength               // Total beats: 1, 2, 4, 8, 16, 32
+  tracks: SetTrack[]              // Vertical lanes
+  clips: SetClip[]                // Clips placed on timeline
+}
+
+// ═══════════════════════════════════════════════════════════════
+// PLAYLIST (ordered Sets queue - like Spotify)
+// ═══════════════════════════════════════════════════════════════
+export interface PlaylistEntry {
+  id: string
+  setId: string
+  repeatCount: number             // How many times to repeat (1 = play once)
+}
+
+export interface Playlist {
+  id: string
+  name: string
+  entries: PlaylistEntry[]
+  loopPlaylist: boolean           // Loop entire playlist when done
 }
 
 // ═══════════════════════════════════════════════════════════════
 // DEFAULT PROFILE
 // ═══════════════════════════════════════════════════════════════
-export const PINSPOT_RGBW: FixtureProfile = {
+export const PINSPOT_RGBW: DeviceProfile = {
   id: 'pinspot-rgbw-5ch',
   name: 'PinSpot LED RGBW',
   channelCount: 5,
@@ -91,6 +149,61 @@ export const PINSPOT_RGBW: FixtureProfile = {
 }
 
 // ═══════════════════════════════════════════════════════════════
+// BUILT-IN PRESETS (for pinspot-rgbw-5ch profile)
+// ═══════════════════════════════════════════════════════════════
+export const BUILT_IN_PRESETS: Preset[] = [
+  // Colors
+  { id: 'builtin-red', name: 'Red', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 0, blue: 0, white: 0 } },
+  { id: 'builtin-green', name: 'Green', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 0, green: 255, blue: 0, white: 0 } },
+  { id: 'builtin-blue', name: 'Blue', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 255, white: 0 } },
+  { id: 'builtin-white', name: 'White', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 0, white: 255 } },
+  { id: 'builtin-cyan', name: 'Cyan', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 0, green: 255, blue: 255, white: 0 } },
+  { id: 'builtin-magenta', name: 'Magenta', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 0, blue: 255, white: 0 } },
+  { id: 'builtin-yellow', name: 'Yellow', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 0, white: 0 } },
+  { id: 'builtin-orange', name: 'Orange', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'color',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 128, blue: 0, white: 0 } },
+
+  // Strobes
+  { id: 'builtin-strobe-slow', name: 'Strobe Slow', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'slow', red: 255, green: 255, blue: 255, white: 255 } },
+  { id: 'builtin-strobe-med', name: 'Strobe Med', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+  { id: 'builtin-strobe-fast', name: 'Strobe Fast', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'fast', red: 255, green: 255, blue: 255, white: 255 } },
+
+  // Dimmers
+  { id: 'builtin-dim-25', name: '25%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
+    values: { dimmer: 64, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+  { id: 'builtin-dim-50', name: '50%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
+    values: { dimmer: 128, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+  { id: 'builtin-dim-75', name: '75%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
+    values: { dimmer: 192, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+  { id: 'builtin-full', name: 'Full', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+]
+
+// ═══════════════════════════════════════════════════════════════
+// TRACK COLORS (for UI)
+// ═══════════════════════════════════════════════════════════════
+export const TRACK_COLORS = [
+  '#ef4444', // red
+  '#f97316', // orange
+  '#eab308', // yellow
+  '#22c55e', // green
+  '#06b6d4', // cyan
+  '#3b82f6', // blue
+  '#8b5cf6', // purple
+  '#ec4899', // pink
+]
+
+// ═══════════════════════════════════════════════════════════════
 // HELPER FUNCTIONS
 // ═══════════════════════════════════════════════════════════════
 
@@ -98,7 +211,7 @@ export function generateId(): string {
   return Math.random().toString(36).substring(2, 9)
 }
 
-export function createDefaultValues(): FixtureValues {
+export function createDefaultValues(): PresetValues {
   return {
     dimmer: 200,
     strobe: false,
@@ -110,17 +223,33 @@ export function createDefaultValues(): FixtureValues {
   }
 }
 
-export function createDefaultBank(): Omit<Bank, 'id'> {
+export function createDefaultSet(): Omit<Set, 'id'> {
   return {
-    name: 'New Bank',
+    name: 'New Set',
     length: 8,
-    unitDuration: 1,
-    cells: Array(8).fill(null),
+    tracks: [],
+    clips: [],
   }
 }
 
-// Convert FixtureValues to DMX channel array (for PinSpot)
-export function valuesToDMX(values: FixtureValues): number[] {
+export function createDefaultTrack(
+  targetType: 'device' | 'group',
+  targetId: string,
+  name: string,
+  colorIndex: number = 0
+): Omit<SetTrack, 'id'> {
+  return {
+    name,
+    targetType,
+    targetId,
+    color: TRACK_COLORS[colorIndex % TRACK_COLORS.length],
+    muted: false,
+    solo: false,
+  }
+}
+
+// Convert PresetValues to DMX channel array (for PinSpot)
+export function valuesToDMX(values: PresetValues): number[] {
   let ch0: number
 
   if (values.strobe) {
@@ -145,10 +274,15 @@ export function valuesToDMX(values: FixtureValues): number[] {
 }
 
 // Get preview color from values (for UI display)
-export function getPreviewColor(values: FixtureValues): string {
+export function getPreviewColor(values: PresetValues): string {
   const { red, green, blue, white } = values
   const r = Math.min(255, red + white * 0.5)
   const g = Math.min(255, green + white * 0.5)
   const b = Math.min(255, blue + white * 0.5)
   return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`
+}
+
+// Get preset color for UI (simpler - just returns the color hex)
+export function getPresetColor(preset: Preset): string {
+  return getPreviewColor(preset.values)
 }

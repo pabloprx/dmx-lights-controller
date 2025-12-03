@@ -1,24 +1,36 @@
 import { ref, computed, watch } from 'vue'
-import type { Fixture, FixtureProfile, Preset, Scene, Bank, FixtureValues } from '~/types/dmx'
-import { PINSPOT_RGBW, generateId, createDefaultValues, createDefaultBank, valuesToDMX } from '~/types/dmx'
+import type {
+  DeviceProfile, Device, Group, Preset, Scene, Set, SetTrack, SetClip, Playlist, PresetValues
+} from '~/types/dmx'
+import {
+  PINSPOT_RGBW, BUILT_IN_PRESETS, TRACK_COLORS,
+  generateId, createDefaultSet, createDefaultTrack, valuesToDMX
+} from '~/types/dmx'
 
-const STORAGE_KEY = 'dmx-store-v2'
+const STORAGE_KEY = 'dmx-store-v3'
 
-// Shared state (singleton)
-const profiles = ref<FixtureProfile[]>([PINSPOT_RGBW])
-const fixtures = ref<Fixture[]>([])
-const presets = ref<Preset[]>([])
+// ═══════════════════════════════════════════════════════════════
+// SHARED STATE (singleton)
+// ═══════════════════════════════════════════════════════════════
+const profiles = ref<DeviceProfile[]>([PINSPOT_RGBW])
+const devices = ref<Device[]>([])
+const groups = ref<Group[]>([])
+const presets = ref<Preset[]>([...BUILT_IN_PRESETS]) // Start with built-in
 const scenes = ref<Scene[]>([])
-const banks = ref<Bank[]>([])
+const sets = ref<Set[]>([])
+const playlists = ref<Playlist[]>([])
 
 // Selection state
-const selectedFixtureId = ref<string | null>(null)
+const selectedDeviceId = ref<string | null>(null)
+const selectedGroupId = ref<string | null>(null)
 const selectedPresetId = ref<string | null>(null)
 const selectedSceneId = ref<string | null>(null)
-const selectedBankId = ref<string | null>(null)
-const activeBankId = ref<string | null>(null) // Bank currently playing
+const selectedSetId = ref<string | null>(null)
+const activeSetId = ref<string | null>(null) // Set currently playing
 
-// Load from localStorage
+// ═══════════════════════════════════════════════════════════════
+// STORAGE
+// ═══════════════════════════════════════════════════════════════
 function loadFromStorage() {
   if (typeof window === 'undefined') return
 
@@ -26,28 +38,33 @@ function loadFromStorage() {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       const data = JSON.parse(stored)
-      fixtures.value = data.fixtures || []
-      presets.value = data.presets || []
+      devices.value = data.devices || []
+      groups.value = data.groups || []
+      // Merge user presets with built-in (don't duplicate built-in)
+      const userPresets = (data.presets || []).filter((p: Preset) => !p.isBuiltIn)
+      presets.value = [...BUILT_IN_PRESETS, ...userPresets]
       scenes.value = data.scenes || []
-      banks.value = data.banks || []
-      activeBankId.value = data.activeBankId || null
+      sets.value = data.sets || []
+      playlists.value = data.playlists || []
+      activeSetId.value = data.activeSetId || null
     }
   } catch (e) {
     console.error('[DMXStore] Failed to load from storage:', e)
   }
 }
 
-// Save to localStorage
 function saveToStorage() {
   if (typeof window === 'undefined') return
 
   try {
     const data = {
-      fixtures: fixtures.value,
-      presets: presets.value,
+      devices: devices.value,
+      groups: groups.value,
+      presets: presets.value.filter(p => !p.isBuiltIn), // Only save user presets
       scenes: scenes.value,
-      banks: banks.value,
-      activeBankId: activeBankId.value,
+      sets: sets.value,
+      playlists: playlists.value,
+      activeSetId: activeSetId.value,
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   } catch (e) {
@@ -57,19 +74,22 @@ function saveToStorage() {
 
 export function useDMXStore() {
   // Initialize on first use
-  if (fixtures.value.length === 0 && presets.value.length === 0 && typeof window !== 'undefined') {
+  if (devices.value.length === 0 && sets.value.length === 0 && typeof window !== 'undefined') {
     loadFromStorage()
   }
 
   // Auto-save on changes
-  watch([fixtures, presets, scenes, banks, activeBankId], saveToStorage, { deep: true })
+  watch([devices, groups, presets, scenes, sets, playlists, activeSetId], saveToStorage, { deep: true })
 
   // ═══════════════════════════════════════════════════════════════
   // COMPUTED
   // ═══════════════════════════════════════════════════════════════
+  const selectedDevice = computed(() =>
+    devices.value.find(d => d.id === selectedDeviceId.value) || null
+  )
 
-  const selectedFixture = computed(() =>
-    fixtures.value.find(f => f.id === selectedFixtureId.value) || null
+  const selectedGroup = computed(() =>
+    groups.value.find(g => g.id === selectedGroupId.value) || null
   )
 
   const selectedPreset = computed(() =>
@@ -80,62 +100,117 @@ export function useDMXStore() {
     scenes.value.find(s => s.id === selectedSceneId.value) || null
   )
 
-  const selectedBank = computed(() =>
-    banks.value.find(b => b.id === selectedBankId.value) || null
+  const selectedSet = computed(() =>
+    sets.value.find(s => s.id === selectedSetId.value) || null
   )
 
-  const activeBank = computed(() =>
-    banks.value.find(b => b.id === activeBankId.value) || null
+  const activeSet = computed(() =>
+    sets.value.find(s => s.id === activeSetId.value) || null
   )
 
-  // Get presets grouped by fixture
-  const presetsByFixture = computed(() => {
+  // Get presets by profile (for preset picker)
+  const presetsByProfile = computed(() => {
     const grouped = new Map<string, Preset[]>()
-    for (const fixture of fixtures.value) {
-      grouped.set(fixture.id, presets.value.filter(p => p.fixtureId === fixture.id))
+    for (const preset of presets.value) {
+      const list = grouped.get(preset.profileId) || []
+      list.push(preset)
+      grouped.set(preset.profileId, list)
     }
     return grouped
   })
 
-  // ═══════════════════════════════════════════════════════════════
-  // FIXTURE CRUD
-  // ═══════════════════════════════════════════════════════════════
+  // Get presets by category (for quick picker)
+  const presetsByCategory = computed(() => {
+    const colors = presets.value.filter(p => p.category === 'color')
+    const strobes = presets.value.filter(p => p.category === 'strobe')
+    const dimmers = presets.value.filter(p => p.category === 'dimmer')
+    const custom = presets.value.filter(p => p.category === 'custom')
+    return { colors, strobes, dimmers, custom }
+  })
 
-  function addFixture(data: Omit<Fixture, 'id'>): Fixture {
-    const fixture: Fixture = { id: generateId(), ...data }
-    fixtures.value.push(fixture)
-    return fixture
+  // ═══════════════════════════════════════════════════════════════
+  // DEVICE CRUD
+  // ═══════════════════════════════════════════════════════════════
+  function addDevice(data: Omit<Device, 'id'>): Device {
+    const device: Device = { id: generateId(), ...data }
+    devices.value.push(device)
+    return device
   }
 
-  function updateFixture(id: string, data: Partial<Fixture>) {
-    const idx = fixtures.value.findIndex(f => f.id === id)
+  function updateDevice(id: string, data: Partial<Device>) {
+    const idx = devices.value.findIndex(d => d.id === id)
     if (idx !== -1) {
-      fixtures.value[idx] = { ...fixtures.value[idx], ...data }
+      devices.value[idx] = { ...devices.value[idx], ...data }
     }
   }
 
-  function deleteFixture(id: string) {
-    // Delete fixture
-    fixtures.value = fixtures.value.filter(f => f.id !== id)
-    // Delete all presets for this fixture
-    const deletedPresetIds = presets.value.filter(p => p.fixtureId === id).map(p => p.id)
-    presets.value = presets.value.filter(p => p.fixtureId !== id)
-    // Remove deleted presets from scenes
-    for (const scene of scenes.value) {
-      scene.presetIds = scene.presetIds.filter(pid => !deletedPresetIds.includes(pid))
+  function deleteDevice(id: string) {
+    devices.value = devices.value.filter(d => d.id !== id)
+    // Remove from all groups
+    for (const group of groups.value) {
+      group.deviceIds = group.deviceIds.filter(did => did !== id)
     }
-    // Clear selection
-    if (selectedFixtureId.value === id) selectedFixtureId.value = null
+    // Remove tracks targeting this device
+    for (const set of sets.value) {
+      const trackIds = set.tracks.filter(t => t.targetType === 'device' && t.targetId === id).map(t => t.id)
+      set.clips = set.clips.filter(c => !trackIds.includes(c.trackId))
+      set.tracks = set.tracks.filter(t => !(t.targetType === 'device' && t.targetId === id))
+    }
+    if (selectedDeviceId.value === id) selectedDeviceId.value = null
   }
 
-  function selectFixture(id: string | null) {
-    selectedFixtureId.value = id
+  function selectDevice(id: string | null) {
+    selectedDeviceId.value = id
+  }
+
+  function getDevice(id: string): Device | null {
+    return devices.value.find(d => d.id === id) || null
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // GROUP CRUD
+  // ═══════════════════════════════════════════════════════════════
+  function addGroup(data: Omit<Group, 'id'>): Group {
+    const group: Group = { id: generateId(), ...data }
+    groups.value.push(group)
+    return group
+  }
+
+  function updateGroup(id: string, data: Partial<Group>) {
+    const idx = groups.value.findIndex(g => g.id === id)
+    if (idx !== -1) {
+      groups.value[idx] = { ...groups.value[idx], ...data }
+    }
+  }
+
+  function deleteGroup(id: string) {
+    groups.value = groups.value.filter(g => g.id !== id)
+    // Remove tracks targeting this group
+    for (const set of sets.value) {
+      const trackIds = set.tracks.filter(t => t.targetType === 'group' && t.targetId === id).map(t => t.id)
+      set.clips = set.clips.filter(c => !trackIds.includes(c.trackId))
+      set.tracks = set.tracks.filter(t => !(t.targetType === 'group' && t.targetId === id))
+    }
+    if (selectedGroupId.value === id) selectedGroupId.value = null
+  }
+
+  function selectGroup(id: string | null) {
+    selectedGroupId.value = id
+  }
+
+  function getGroup(id: string): Group | null {
+    return groups.value.find(g => g.id === id) || null
+  }
+
+  function getGroupDevices(groupId: string): Device[] {
+    const group = groups.value.find(g => g.id === groupId)
+    if (!group) return []
+    return devices.value.filter(d => group.deviceIds.includes(d.id))
   }
 
   // ═══════════════════════════════════════════════════════════════
   // PRESET CRUD
   // ═══════════════════════════════════════════════════════════════
-
   function addPreset(data: Omit<Preset, 'id'>): Preset {
     const preset: Preset = { id: generateId(), ...data }
     presets.value.push(preset)
@@ -143,17 +218,21 @@ export function useDMXStore() {
   }
 
   function updatePreset(id: string, data: Partial<Preset>) {
-    const idx = presets.value.findIndex(p => p.id === id)
-    if (idx !== -1) {
-      presets.value[idx] = { ...presets.value[idx], ...data }
+    const preset = presets.value.find(p => p.id === id)
+    if (preset && !preset.isBuiltIn) {
+      const idx = presets.value.findIndex(p => p.id === id)
+      presets.value[idx] = { ...preset, ...data }
     }
   }
 
   function deletePreset(id: string) {
+    const preset = presets.value.find(p => p.id === id)
+    if (preset?.isBuiltIn) return // Can't delete built-in
+
     presets.value = presets.value.filter(p => p.id !== id)
-    // Remove from all scenes
-    for (const scene of scenes.value) {
-      scene.presetIds = scene.presetIds.filter(pid => pid !== id)
+    // Remove clips using this preset
+    for (const set of sets.value) {
+      set.clips = set.clips.filter(c => c.presetId !== id)
     }
     if (selectedPresetId.value === id) selectedPresetId.value = null
   }
@@ -162,18 +241,17 @@ export function useDMXStore() {
     selectedPresetId.value = id
   }
 
-  function getPresetsForFixture(fixtureId: string): Preset[] {
-    return presets.value.filter(p => p.fixtureId === fixtureId)
-  }
-
   function getPreset(id: string): Preset | null {
     return presets.value.find(p => p.id === id) || null
+  }
+
+  function getPresetsForProfile(profileId: string): Preset[] {
+    return presets.value.filter(p => p.profileId === profileId)
   }
 
   // ═══════════════════════════════════════════════════════════════
   // SCENE CRUD
   // ═══════════════════════════════════════════════════════════════
-
   function addScene(data: Omit<Scene, 'id'>): Scene {
     const scene: Scene = { id: generateId(), ...data }
     scenes.value.push(scene)
@@ -189,10 +267,6 @@ export function useDMXStore() {
 
   function deleteScene(id: string) {
     scenes.value = scenes.value.filter(s => s.id !== id)
-    // Remove from all banks
-    for (const bank of banks.value) {
-      bank.cells = bank.cells.map(cell => cell === id ? null : cell)
-    }
     if (selectedSceneId.value === id) selectedSceneId.value = null
   }
 
@@ -205,94 +279,196 @@ export function useDMXStore() {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // BANK CRUD
+  // SET CRUD
   // ═══════════════════════════════════════════════════════════════
-
-  function addBank(data?: Partial<Omit<Bank, 'id'>>): Bank {
-    const defaults = createDefaultBank()
-    const bank: Bank = {
+  function addSet(data?: Partial<Omit<Set, 'id'>>): Set {
+    const defaults = createDefaultSet()
+    const set: Set = {
       id: generateId(),
       name: data?.name || defaults.name,
       length: data?.length || defaults.length,
-      unitDuration: data?.unitDuration || defaults.unitDuration,
-      cells: data?.cells || defaults.cells,
+      tracks: data?.tracks || defaults.tracks,
+      clips: data?.clips || defaults.clips,
     }
-    banks.value.push(bank)
-    return bank
+    sets.value.push(set)
+    return set
   }
 
-  function updateBank(id: string, data: Partial<Bank>) {
-    const idx = banks.value.findIndex(b => b.id === id)
+  function updateSet(id: string, data: Partial<Set>) {
+    const idx = sets.value.findIndex(s => s.id === id)
     if (idx !== -1) {
-      const bank = banks.value[idx]
-      // If length changed, adjust cells array
-      if (data.length && data.length !== bank.length) {
-        const newLength = Math.round(data.length / (data.unitDuration || bank.unitDuration))
-        const oldCells = bank.cells
-        data.cells = Array(newLength).fill(null).map((_, i) => oldCells[i] || null)
-      }
-      banks.value[idx] = { ...bank, ...data }
+      sets.value[idx] = { ...sets.value[idx], ...data }
     }
   }
 
-  function deleteBank(id: string) {
-    banks.value = banks.value.filter(b => b.id !== id)
-    if (selectedBankId.value === id) selectedBankId.value = null
-    if (activeBankId.value === id) activeBankId.value = null
-  }
-
-  function selectBank(id: string | null) {
-    selectedBankId.value = id
-  }
-
-  function setActiveBank(id: string | null) {
-    activeBankId.value = id
-  }
-
-  function setBankCell(bankId: string, cellIndex: number, sceneId: string | null) {
-    const bank = banks.value.find(b => b.id === bankId)
-    if (bank && cellIndex >= 0 && cellIndex < bank.cells.length) {
-      bank.cells[cellIndex] = sceneId
+  function deleteSet(id: string) {
+    sets.value = sets.value.filter(s => s.id !== id)
+    // Remove from playlists
+    for (const playlist of playlists.value) {
+      playlist.entries = playlist.entries.filter(e => e.setId !== id)
     }
+    if (selectedSetId.value === id) selectedSetId.value = null
+    if (activeSetId.value === id) activeSetId.value = null
+  }
+
+  function selectSet(id: string | null) {
+    selectedSetId.value = id
+  }
+
+  function setActiveSet(id: string | null) {
+    activeSetId.value = id
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SET TRACK OPERATIONS
+  // ═══════════════════════════════════════════════════════════════
+  function addTrackToSet(setId: string, targetType: 'device' | 'group', targetId: string): SetTrack | null {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return null
+
+    const target = targetType === 'device' ? getDevice(targetId) : getGroup(targetId)
+    if (!target) return null
+
+    const track: SetTrack = {
+      id: generateId(),
+      name: target.name,
+      targetType,
+      targetId,
+      color: TRACK_COLORS[set.tracks.length % TRACK_COLORS.length],
+      muted: false,
+      solo: false,
+    }
+    set.tracks.push(track)
+    return track
+  }
+
+  function updateTrack(setId: string, trackId: string, data: Partial<SetTrack>) {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return
+
+    const idx = set.tracks.findIndex(t => t.id === trackId)
+    if (idx !== -1) {
+      set.tracks[idx] = { ...set.tracks[idx], ...data }
+    }
+  }
+
+  function deleteTrack(setId: string, trackId: string) {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return
+
+    set.tracks = set.tracks.filter(t => t.id !== trackId)
+    set.clips = set.clips.filter(c => c.trackId !== trackId)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // SET CLIP OPERATIONS
+  // ═══════════════════════════════════════════════════════════════
+  function addClipToSet(setId: string, trackId: string, presetId: string, startBeat: number, duration: number = 1): SetClip | null {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return null
+
+    const track = set.tracks.find(t => t.id === trackId)
+    if (!track) return null
+
+    const clip: SetClip = {
+      id: generateId(),
+      trackId,
+      presetId,
+      startBeat,
+      duration,
+    }
+    set.clips.push(clip)
+    return clip
+  }
+
+  function updateClip(setId: string, clipId: string, data: Partial<SetClip>) {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return
+
+    const idx = set.clips.findIndex(c => c.id === clipId)
+    if (idx !== -1) {
+      set.clips[idx] = { ...set.clips[idx], ...data }
+    }
+  }
+
+  function deleteClip(setId: string, clipId: string) {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return
+
+    set.clips = set.clips.filter(c => c.id !== clipId)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PLAYLIST CRUD
+  // ═══════════════════════════════════════════════════════════════
+  function addPlaylist(data: Omit<Playlist, 'id'>): Playlist {
+    const playlist: Playlist = { id: generateId(), ...data }
+    playlists.value.push(playlist)
+    return playlist
+  }
+
+  function updatePlaylist(id: string, data: Partial<Playlist>) {
+    const idx = playlists.value.findIndex(p => p.id === id)
+    if (idx !== -1) {
+      playlists.value[idx] = { ...playlists.value[idx], ...data }
+    }
+  }
+
+  function deletePlaylist(id: string) {
+    playlists.value = playlists.value.filter(p => p.id !== id)
+  }
+
+  function getPlaylist(id: string): Playlist | null {
+    return playlists.value.find(p => p.id === id) || null
   }
 
   // ═══════════════════════════════════════════════════════════════
   // DMX HELPERS
   // ═══════════════════════════════════════════════════════════════
-
-  function getProfile(profileId: string): FixtureProfile | null {
+  function getProfile(profileId: string): DeviceProfile | null {
     return profiles.value.find(p => p.id === profileId) || null
   }
 
-  // Get DMX values for a single fixture given its values
-  function getFixtureDMX(fixtureId: string, values: FixtureValues): { startChannel: number; channels: number[] } | null {
-    const fixture = fixtures.value.find(f => f.id === fixtureId)
-    if (!fixture) return null
-    return {
-      startChannel: fixture.startChannel,
-      channels: valuesToDMX(values),
+  // Get all devices for a target (resolves group to devices)
+  function getTargetDevices(targetType: 'device' | 'group', targetId: string): Device[] {
+    if (targetType === 'device') {
+      const device = getDevice(targetId)
+      return device ? [device] : []
     }
+    return getGroupDevices(targetId)
   }
 
-  // Get full 512-channel DMX array for a scene
-  function getSceneDMX(sceneId: string): number[] {
+  // Get DMX array for active set at current beat (with additive mixing + auto-blackout)
+  function getSetDMX(set: Set, beat: number): number[] {
+    // Start with all zeros (auto-blackout for inactive channels!)
     const dmx = new Array(512).fill(0)
-    const scene = scenes.value.find(s => s.id === sceneId)
-    if (!scene) return dmx
 
-    for (const presetId of scene.presetIds) {
-      const preset = presets.value.find(p => p.id === presetId)
+    // Check if any track is soloed
+    const hasSolo = set.tracks.some(t => t.solo)
+
+    for (const clip of set.clips) {
+      // Check if clip is active at current beat
+      if (beat < clip.startBeat || beat >= clip.startBeat + clip.duration) continue
+
+      const track = set.tracks.find(t => t.id === clip.trackId)
+      if (!track || track.muted) continue
+
+      // Handle solo: if any track soloed, skip non-soloed
+      if (hasSolo && !track.solo) continue
+
+      const preset = getPreset(clip.presetId)
       if (!preset) continue
 
-      const fixture = fixtures.value.find(f => f.id === preset.fixtureId)
-      if (!fixture) continue
+      const targetDevices = getTargetDevices(track.targetType, track.targetId)
 
-      const channels = valuesToDMX(preset.values)
-      const startIdx = fixture.startChannel - 1 // DMX is 1-indexed
+      // Apply preset to all devices (ADDITIVE merge - colors mix!)
+      for (const device of targetDevices) {
+        const channels = valuesToDMX(preset.values)
+        const start = device.startChannel - 1 // DMX is 1-indexed
 
-      for (let i = 0; i < channels.length; i++) {
-        if (startIdx + i < 512) {
-          dmx[startIdx + i] = channels[i]
+        for (let i = 0; i < channels.length && start + i < 512; i++) {
+          // Additive: add values, cap at 255
+          dmx[start + i] = Math.min(255, dmx[start + i] + channels[i])
         }
       }
     }
@@ -300,63 +476,77 @@ export function useDMXStore() {
     return dmx
   }
 
-  // Get the scene at a specific beat position in the active bank
-  function getSceneAtBeat(beat: number): Scene | null {
-    const bank = activeBank.value
-    if (!bank) return null
+  // Detect overlapping device control for UI warnings
+  function getOverlappingDevices(set: Set, beat: number): Map<string, string[]> {
+    const deviceTracks = new Map<string, string[]>() // deviceId -> trackNames[]
 
-    const cellCount = bank.cells.length
-    const beatsPerCell = bank.unitDuration
-    const totalBeats = bank.length
+    for (const clip of set.clips) {
+      if (beat < clip.startBeat || beat >= clip.startBeat + clip.duration) continue
 
-    // Normalize beat to bank loop
-    const beatInLoop = beat % totalBeats
-    const cellIndex = Math.floor(beatInLoop / beatsPerCell)
+      const track = set.tracks.find(t => t.id === clip.trackId)
+      if (!track) continue
 
-    if (cellIndex >= 0 && cellIndex < cellCount) {
-      const sceneId = bank.cells[cellIndex]
-      if (sceneId) {
-        return scenes.value.find(s => s.id === sceneId) || null
+      const targetDevices = getTargetDevices(track.targetType, track.targetId)
+
+      for (const device of targetDevices) {
+        const existing = deviceTracks.get(device.id) || []
+        existing.push(track.name)
+        deviceTracks.set(device.id, existing)
       }
     }
 
-    return null
+    // Return only devices with multiple tracks
+    return new Map([...deviceTracks].filter(([_, tracks]) => tracks.length > 1))
   }
 
   return {
     // State
     profiles,
-    fixtures,
+    devices,
+    groups,
     presets,
     scenes,
-    banks,
-    selectedFixtureId,
+    sets,
+    playlists,
+    selectedDeviceId,
+    selectedGroupId,
     selectedPresetId,
     selectedSceneId,
-    selectedBankId,
-    activeBankId,
+    selectedSetId,
+    activeSetId,
 
     // Computed
-    selectedFixture,
+    selectedDevice,
+    selectedGroup,
     selectedPreset,
     selectedScene,
-    selectedBank,
-    activeBank,
-    presetsByFixture,
+    selectedSet,
+    activeSet,
+    presetsByProfile,
+    presetsByCategory,
 
-    // Fixture methods
-    addFixture,
-    updateFixture,
-    deleteFixture,
-    selectFixture,
+    // Device methods
+    addDevice,
+    updateDevice,
+    deleteDevice,
+    selectDevice,
+    getDevice,
+
+    // Group methods
+    addGroup,
+    updateGroup,
+    deleteGroup,
+    selectGroup,
+    getGroup,
+    getGroupDevices,
 
     // Preset methods
     addPreset,
     updatePreset,
     deletePreset,
     selectPreset,
-    getPresetsForFixture,
     getPreset,
+    getPresetsForProfile,
 
     // Scene methods
     addScene,
@@ -365,19 +555,34 @@ export function useDMXStore() {
     selectScene,
     getScene,
 
-    // Bank methods
-    addBank,
-    updateBank,
-    deleteBank,
-    selectBank,
-    setActiveBank,
-    setBankCell,
+    // Set methods
+    addSet,
+    updateSet,
+    deleteSet,
+    selectSet,
+    setActiveSet,
+
+    // Track methods
+    addTrackToSet,
+    updateTrack,
+    deleteTrack,
+
+    // Clip methods
+    addClipToSet,
+    updateClip,
+    deleteClip,
+
+    // Playlist methods
+    addPlaylist,
+    updatePlaylist,
+    deletePlaylist,
+    getPlaylist,
 
     // DMX helpers
     getProfile,
-    getFixtureDMX,
-    getSceneDMX,
-    getSceneAtBeat,
+    getTargetDevices,
+    getSetDMX,
+    getOverlappingDevices,
 
     // Storage
     loadFromStorage,
