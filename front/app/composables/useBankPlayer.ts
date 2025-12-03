@@ -2,7 +2,7 @@ import { watch, computed } from 'vue'
 
 export function useBankPlayer() {
   const { state: linkState } = useAbletonLink()
-  const { isConnected: serialConnected, sendScene } = useSerial()
+  const { isConnected: serialConnected, sendDMX } = useUnifiedSerial()
   const { activeBank, getSceneAtBeat, getSceneDMX } = useDMXStore()
 
   let lastSentBeat = -1
@@ -43,11 +43,11 @@ export function useBankPlayer() {
 
         if (scene) {
           const dmxValues = getSceneDMX(scene.id)
-          // Send first 30 channels (6 fixtures * 5 channels)
-          sendScene(dmxValues.slice(0, 30))
+          // Send first 16 channels
+          sendDMX(dmxValues.slice(0, 16))
         } else {
           // No scene - send blackout
-          sendScene(new Array(30).fill(0))
+          sendDMX(new Array(16).fill(0))
         }
       }
     }
@@ -62,9 +62,9 @@ export function useBankPlayer() {
 
     if (scene) {
       const dmxValues = getSceneDMX(scene.id)
-      sendScene(dmxValues.slice(0, 30))
+      sendDMX(dmxValues.slice(0, 16))
     } else {
-      sendScene(new Array(30).fill(0))
+      sendDMX(new Array(16).fill(0))
     }
   }
 
@@ -73,13 +73,13 @@ export function useBankPlayer() {
     if (!serialConnected.value) return
 
     const dmxValues = getSceneDMX(sceneId)
-    sendScene(dmxValues.slice(0, 30))
+    sendDMX(dmxValues.slice(0, 16))
   }
 
   // Send blackout
   function blackout() {
     if (!serialConnected.value) return
-    sendScene(new Array(30).fill(0))
+    sendDMX(new Array(16).fill(0))
   }
 
   return {
