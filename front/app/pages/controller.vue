@@ -1,6 +1,8 @@
 <script setup lang="ts">
 import TransportBar from '~/components/transport/TransportBar.vue'
 
+const { isPerformanceMode, isTestingMode } = useAppMode()
+
 const activeTab = ref<'fixtures' | 'presets' | 'scenes' | 'banks'>('banks')
 
 const tabs = [
@@ -9,6 +11,9 @@ const tabs = [
   { id: 'scenes' as const, label: 'Scenes' },
   { id: 'banks' as const, label: 'Banks' },
 ]
+
+// Active tab accent color based on mode
+const accentColor = computed(() => isPerformanceMode.value ? 'red' : 'green')
 </script>
 
 <template>
@@ -20,13 +25,23 @@ const tabs = [
         v-for="tab in tabs"
         :key="tab.id"
         class="px-6 py-3 text-sm font-medium transition-colors"
-        :class="activeTab === tab.id
-          ? 'text-green-400 border-b-2 border-green-400 bg-neutral-900'
-          : 'text-neutral-400 hover:text-white hover:bg-neutral-800'"
+        :class="[
+          activeTab === tab.id
+            ? (isPerformanceMode ? 'text-red-400 border-b-2 border-red-400 bg-neutral-900' : 'text-green-400 border-b-2 border-green-400 bg-neutral-900')
+            : 'text-neutral-400 hover:text-white hover:bg-neutral-800'
+        ]"
         @click="activeTab = tab.id"
       >
         {{ tab.label }}
       </button>
+
+      <!-- Performance mode indicator -->
+      <div v-if="isPerformanceMode" class="ml-auto flex items-center px-4">
+        <div class="flex items-center gap-2 text-red-400">
+          <div class="w-2 h-2 rounded-full bg-red-500 animate-pulse"></div>
+          <span class="text-xs font-bold uppercase">LIVE</span>
+        </div>
+      </div>
     </div>
 
     <div class="flex-1 overflow-hidden">

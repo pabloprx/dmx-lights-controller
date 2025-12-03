@@ -2,8 +2,18 @@
 import { getPreviewColor } from '~/types/dmx'
 
 const { selectedBank, scenes, presets, setBankCell, getScene } = useDMXStore()
-const { currentCellIndex, currentBeatInBank } = useBankPlayer()
+const { currentCellIndex, currentBeatInBank, isPlaying } = useBankPlayer()
 const { state: linkState } = useAbletonLink()
+const {
+  isTestingMode,
+  isPerformanceMode,
+  internalPlaying,
+  internalTempo,
+  internalBeat,
+  toggleInternalPlayback,
+  setInternalTempo,
+  stepBeat,
+} = useAppMode()
 
 const CELL_WIDTH = 80
 
@@ -62,6 +72,35 @@ function handleCellRightClick(cellIndex: number, event: MouseEvent) {
     <template v-else>
       <div class="flex items-center justify-between mb-2">
         <h3 class="text-sm font-bold text-white">{{ selectedBank.name }}</h3>
+
+        <!-- Testing mode playback controls -->
+        <div v-if="isTestingMode" class="flex items-center gap-2">
+          <button
+            class="w-8 h-8 flex items-center justify-center rounded text-sm cursor-pointer transition-colors"
+            :class="internalPlaying ? 'bg-amber-500 text-black hover:bg-amber-400' : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'"
+            title="Auto play"
+            @click="toggleInternalPlayback"
+          >
+            {{ internalPlaying ? '⏸' : '▶' }}
+          </button>
+          <button
+            class="w-8 h-8 flex items-center justify-center rounded text-sm bg-neutral-700 text-neutral-300 hover:bg-neutral-600 cursor-pointer"
+            title="Step to next beat"
+            @click="stepBeat"
+          >
+            ⏭
+          </button>
+          <input
+            type="number"
+            :value="internalTempo"
+            min="20"
+            max="300"
+            class="w-14 bg-neutral-800 border border-neutral-600 text-white text-center rounded px-2 py-1 text-xs font-mono"
+            @change="(e) => setInternalTempo(Number((e.target as HTMLInputElement).value))"
+          />
+          <span class="text-xs text-neutral-500">BPM</span>
+        </div>
+
         <span class="text-xs text-neutral-500">
           Click cell to cycle scenes, right-click to clear
         </span>
@@ -89,7 +128,9 @@ function handleCellRightClick(cellIndex: number, event: MouseEvent) {
               :key="idx"
               class="h-full border-r border-neutral-700 cursor-pointer flex flex-col items-center justify-center gap-1 transition-colors"
               :class="[
-                currentCellIndex === idx && linkState.isPlaying ? 'bg-green-900/30' : 'hover:bg-neutral-800',
+                currentCellIndex === idx && isPlaying
+                  ? (isPerformanceMode ? 'bg-green-900/30' : 'bg-amber-900/30')
+                  : 'hover:bg-neutral-800',
               ]"
               :style="{ width: `${CELL_WIDTH}px` }"
               @click="handleCellClick(idx)"
@@ -112,8 +153,9 @@ function handleCellRightClick(cellIndex: number, event: MouseEvent) {
             </div>
 
             <div
-              v-if="linkState.isPlaying && currentBeatInBank >= 0"
-              class="absolute top-0 bottom-0 w-0.5 bg-green-500 z-10 pointer-events-none transition-all"
+              v-if="isPlaying && currentBeatInBank >= 0"
+              class="absolute top-0 bottom-0 w-0.5 z-10 pointer-events-none transition-all"
+              :class="isPerformanceMode ? 'bg-green-500' : 'bg-amber-500'"
               :style="{ left: `${beatIndicatorLeft}px` }"
             ></div>
           </div>

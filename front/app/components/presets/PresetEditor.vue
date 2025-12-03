@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { FixtureValues, StrobeSpeed } from '~/types/dmx'
-import { createDefaultValues, getPreviewColor } from '~/types/dmx'
+import { createDefaultValues, getPreviewColor, valuesToDMX } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -14,7 +14,9 @@ const emit = defineEmits<{
   close: []
 }>()
 
-const { presets, fixtures, addPreset, updatePreset, deletePreset, getPreset, selectedFixtureId } = useDMXStore()
+const { presets, fixtures, addPreset, updatePreset, deletePreset, getPreset, selectedFixtureId, getFixture } = useDMXStore()
+const { isTestingMode, blackout } = useAppMode()
+const { isConnected: serialConnected, sendDMX } = useUnifiedSerial()
 
 const isEditing = computed(() => props.presetId !== null)
 const existingPreset = computed(() =>
@@ -41,6 +43,29 @@ watchEffect(() => {
 })
 
 const previewColor = computed(() => getPreviewColor(values.value))
+
+// Live preview in testing mode - send DMX when values change
+const currentFixture = computed(() => getFixture(fixtureId.value))
+
+watch(
+  () => ({ ...values.value, fixtureId: fixtureId.value }),
+  () => {
+    if (!isTestingMode.value || !serialConnected.value || blackout.value) return
+    if (!currentFixture.value) return
+
+    // Build DMX array with this preset's values at fixture's channels
+    const dmxArray = new Array(16).fill(0)
+    const channels = valuesToDMX(values.value)
+    const startCh = currentFixture.value.startChannel - 1 // 0-indexed
+
+    for (let i = 0; i < channels.length && startCh + i < 16; i++) {
+      dmxArray[startCh + i] = channels[i]
+    }
+
+    sendDMX(dmxArray)
+  },
+  { deep: true }
+)
 
 const strobeOptions: { value: StrobeSpeed; label: string }[] = [
   { value: 'slow', label: 'Slow' },

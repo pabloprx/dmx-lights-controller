@@ -88,10 +88,8 @@ export function useAbletonLink() {
     }, 2000);
   }
 
-  onMounted(() => {
-    connect();
-  });
-
+  // Manual connection - user clicks to connect
+  // Auto-cleanup on unmount
   onUnmounted(() => {
     disconnect();
   });
