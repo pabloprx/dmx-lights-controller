@@ -1,6 +1,12 @@
 // ═══════════════════════════════════════════════════════════════
 // DEVICE PROFILE (template for a type of fixture)
 // ═══════════════════════════════════════════════════════════════
+export interface ChannelRange {
+  min: number
+  max: number
+  label: string
+}
+
 export interface ChannelDefinition {
   offset: number
   name: string
@@ -8,13 +14,18 @@ export interface ChannelDefinition {
   min: number
   max: number
   defaultValue: number
+  description?: string
+  ranges?: ChannelRange[]  // For channels with multiple function ranges
 }
+
+export type ProfileControlType = 'rgbw' | 'sliders'
 
 export interface DeviceProfile {
   id: string
   name: string
   channelCount: number
   channels: ChannelDefinition[]
+  controlType: ProfileControlType  // Determines UI: color pads vs sliders
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -145,20 +156,60 @@ export interface Playlist {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// DEFAULT PROFILE
+// DEVICE PROFILES
 // ═══════════════════════════════════════════════════════════════
 export const PINSPOT_RGBW: DeviceProfile = {
   id: 'pinspot-rgbw-5ch',
-  name: 'PinSpot LED RGBW',
+  name: 'PinSpot 15W RGBW',
   channelCount: 5,
+  controlType: 'rgbw',
   channels: [
-    { offset: 0, name: 'Master/Strobe', type: 'dimmer', min: 0, max: 255, defaultValue: 134 },
-    // Channel 0 values: 0-8=off, 9-134=dimmer, 135-239=strobe, 240-255=full
+    {
+      offset: 0,
+      name: 'Dimmer/Strobe',
+      type: 'dimmer',
+      min: 0,
+      max: 255,
+      defaultValue: 134,
+      ranges: [
+        { min: 0, max: 8, label: 'Off' },
+        { min: 9, max: 134, label: 'Dimmer' },
+        { min: 135, max: 239, label: 'Strobe (slow-fast)' },
+        { min: 240, max: 255, label: 'Full' },
+      ],
+    },
     { offset: 1, name: 'Red', type: 'color', min: 0, max: 255, defaultValue: 0 },
     { offset: 2, name: 'Green', type: 'color', min: 0, max: 255, defaultValue: 0 },
     { offset: 3, name: 'Blue', type: 'color', min: 0, max: 255, defaultValue: 0 },
     { offset: 4, name: 'White', type: 'color', min: 0, max: 255, defaultValue: 0 },
   ],
+}
+
+export const LASER_10CH: DeviceProfile = {
+  id: 'laser-10ch',
+  name: 'Laser 10ch',
+  channelCount: 10,
+  controlType: 'sliders',
+  channels: [
+    { offset: 0, name: 'Mode', type: 'other', min: 0, max: 255, defaultValue: 64, description: 'Manual mode = 64' },
+    { offset: 1, name: 'Patterns', type: 'other', min: 0, max: 255, defaultValue: 0 },
+    { offset: 2, name: 'Rotation', type: 'other', min: 0, max: 255, defaultValue: 0 },
+    { offset: 3, name: 'H. Control', type: 'other', min: 0, max: 255, defaultValue: 0 },
+    { offset: 4, name: 'V. Control', type: 'other', min: 0, max: 255, defaultValue: 0 },
+    { offset: 5, name: 'H. Position', type: 'other', min: 0, max: 255, defaultValue: 128 },
+    { offset: 6, name: 'V. Position', type: 'other', min: 0, max: 255, defaultValue: 128 },
+    { offset: 7, name: 'Size', type: 'other', min: 0, max: 255, defaultValue: 128 },
+    { offset: 8, name: 'Color', type: 'other', min: 0, max: 255, defaultValue: 0 },
+    { offset: 9, name: 'Beam', type: 'other', min: 0, max: 255, defaultValue: 255 },
+  ],
+}
+
+// All available device profiles
+export const DEVICE_PROFILES: DeviceProfile[] = [PINSPOT_RGBW, LASER_10CH]
+
+// Helper to get profile by ID
+export function getProfileById(profileId: string): DeviceProfile | undefined {
+  return DEVICE_PROFILES.find(p => p.id === profileId)
 }
 
 // ═══════════════════════════════════════════════════════════════

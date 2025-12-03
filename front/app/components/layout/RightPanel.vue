@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
-import { getPreviewColor, createDefaultValues } from '~/types/dmx'
+import { getPreviewColor, createDefaultValues, getProfileById } from '~/types/dmx'
+import type { DeviceProfile } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -9,23 +10,41 @@ import { Label } from '@/components/ui/label'
 const store = useDMXStore()
 
 const presetsExpanded = ref(true)
-const scenesExpanded = ref(true)
 
-// Get preset categories
+// Get selected device's profile
+const selectedProfile = computed((): DeviceProfile | null => {
+  if (!store.selectedDevice.value) return null
+  return getProfileById(store.selectedDevice.value.profileId) || null
+})
+
+// Control type determines which UI to show
+const controlType = computed(() => selectedProfile.value?.controlType || 'rgbw')
+
+// Get preset categories (only for RGBW profiles)
 const colorPresets = computed(() =>
-  store.presets.value.filter(p => p.category === 'color')
+  store.presets.value.filter(p => p.category === 'color' && p.profileId === 'pinspot-rgbw-5ch')
 )
 const strobePresets = computed(() =>
-  store.presets.value.filter(p => p.category === 'strobe')
+  store.presets.value.filter(p => p.category === 'strobe' && p.profileId === 'pinspot-rgbw-5ch')
 )
 const dimmerPresets = computed(() =>
-  store.presets.value.filter(p => p.category === 'dimmer')
+  store.presets.value.filter(p => p.category === 'dimmer' && p.profileId === 'pinspot-rgbw-5ch')
 )
 const customPresets = computed(() =>
-  store.presets.value.filter(p => p.category === 'custom')
+  store.presets.value.filter(p => p.category === 'custom' && p.profileId === 'pinspot-rgbw-5ch')
 )
 
-// Add preset dialog
+// Channel values for Laser control
+const laserChannels = ref<number[]>([64, 0, 0, 0, 0, 128, 128, 128, 0, 255])
+
+// Initialize laser channels from profile defaults
+watch(selectedProfile, (profile) => {
+  if (profile?.controlType === 'sliders') {
+    laserChannels.value = profile.channels.map(ch => ch.defaultValue)
+  }
+}, { immediate: true })
+
+// Add preset dialog (only for RGBW)
 const showAddPreset = ref(false)
 const newPresetName = ref('')
 const newPresetValues = ref(createDefaultValues())
@@ -48,205 +67,196 @@ function handleAddPreset() {
 
 // Master dimmer for quick adjustments
 const masterDimmer = ref(100)
-
-function getPresetStyle(preset: typeof store.presets.value[0]) {
-  const color = getPreviewColor(preset.values)
-  return {
-    backgroundColor: color,
-  }
-}
 </script>
 
 <template>
   <div class="flex flex-col h-full overflow-y-auto">
     <!-- ═══════════════════════════════════════════════════════════
-         PRESETS SECTION
+         CONTROLS SECTION - Dynamic based on selected device profile
          ═══════════════════════════════════════════════════════════ -->
     <section class="flex-1 border-b border-zinc-800/50">
-      <!-- Section Header with LED indicator -->
+      <!-- Section Header -->
       <button
         class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
                hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
         @click="presetsExpanded = !presetsExpanded"
       >
         <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
-        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Presets</span>
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">
+          {{ controlType === 'sliders' ? 'Channels' : 'Presets' }}
+        </span>
+        <span
+          v-if="selectedProfile"
+          class="px-1.5 py-0.5 text-[9px] font-bold rounded ml-1"
+          :class="controlType === 'sliders'
+            ? 'bg-purple-500/20 text-purple-400'
+            : 'bg-cyan-500/20 text-cyan-400'"
+        >
+          {{ selectedProfile.name }}
+        </span>
         <span class="ml-auto text-xs font-mono text-zinc-500">
-          {{ String(store.presets.value.length).padStart(2, '0') }}
+          {{ controlType === 'sliders' ? selectedProfile?.channelCount || 0 : store.presets.value.filter(p => p.profileId === 'pinspot-rgbw-5ch').length }}
         </span>
         <span class="text-zinc-600 text-[10px] transition-transform duration-200"
               :class="presetsExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
       </button>
 
       <div v-if="presetsExpanded" class="px-3 py-3 space-y-4">
-        <!-- Master Dimmer -->
-        <div class="flex items-center gap-3 px-3 py-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
-          <label class="text-xs font-medium text-zinc-400">Master</label>
-          <input
-            v-model.number="masterDimmer"
-            type="range"
-            min="0"
-            max="100"
-            class="flex-1 h-1.5 cursor-pointer accent-green-500"
+        <!-- No device selected state -->
+        <div v-if="!store.selectedDevice.value" class="py-8 text-center">
+          <div class="text-zinc-500 text-xs mb-2">No device selected</div>
+          <div class="text-zinc-600 text-[10px]">Select a device from the left panel</div>
+        </div>
+
+        <!-- ═══════════════════════════════════════════════════════════
+             LASER CHANNEL SLIDERS (controlType: 'sliders')
+             ═══════════════════════════════════════════════════════════ -->
+        <template v-else-if="controlType === 'sliders' && selectedProfile">
+          <div
+            v-for="(channel, idx) in selectedProfile.channels"
+            :key="channel.offset"
+            class="channel-row"
           >
-          <span class="text-xs font-mono text-green-400 min-w-[40px] text-right">{{ masterDimmer }}%</span>
-        </div>
+            <div class="channel-info">
+              <span class="channel-name">{{ channel.name }}</span>
+              <span v-if="channel.description" class="channel-desc">{{ channel.description }}</span>
+            </div>
+            <div class="channel-control">
+              <input
+                v-model.number="laserChannels[idx]"
+                type="range"
+                :min="channel.min"
+                :max="channel.max"
+                class="channel-slider"
+              >
+              <span class="channel-value">{{ laserChannels[idx] }}</span>
+            </div>
+          </div>
+        </template>
 
-        <!-- Color Grid - GLOWING PADS -->
-        <div>
-          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Colors</span>
-          <div class="grid grid-cols-4 gap-1.5">
-            <button
-              v-for="preset in colorPresets"
-              :key="preset.id"
-              class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
-                     border-2 flex items-center justify-center"
-              :class="store.selectedPresetId.value === preset.id
-                ? 'border-white scale-105 z-10'
-                : 'border-transparent hover:scale-105'"
-              :style="{
-                background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
-                boxShadow: store.selectedPresetId.value === preset.id
-                  ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
-                  : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
-              }"
-              :title="preset.name"
-              @click="store.selectPreset(preset.id)"
+        <!-- ═══════════════════════════════════════════════════════════
+             RGBW COLOR PRESETS (controlType: 'rgbw')
+             ═══════════════════════════════════════════════════════════ -->
+        <template v-else>
+          <!-- Master Dimmer -->
+          <div class="flex items-center gap-3 px-3 py-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
+            <label class="text-xs font-medium text-zinc-400">Master</label>
+            <input
+              v-model.number="masterDimmer"
+              type="range"
+              min="0"
+              max="100"
+              class="flex-1 h-1.5 cursor-pointer accent-green-500"
             >
-              <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
+            <span class="text-xs font-mono text-green-400 min-w-[40px] text-right">{{ masterDimmer }}%</span>
+          </div>
+
+          <!-- Color Grid - GLOWING PADS -->
+          <div>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Colors</span>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button
+                v-for="preset in colorPresets"
+                :key="preset.id"
+                class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
+                       border-2 flex items-center justify-center"
+                :class="store.selectedPresetId.value === preset.id
+                  ? 'border-white scale-105 z-10'
+                  : 'border-transparent hover:scale-105'"
+                :style="{
+                  background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
+                  boxShadow: store.selectedPresetId.value === preset.id
+                    ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
+                    : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
+                }"
+                :title="preset.name"
+                @click="store.selectPreset(preset.id)"
+              >
+                <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
+                  {{ preset.name }}
+                </span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Strobe Buttons -->
+          <div>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Strobe</span>
+            <div class="flex gap-1.5">
+              <button
+                v-for="preset in strobePresets"
+                :key="preset.id"
+                class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
+                       border border-zinc-800"
+                :class="store.selectedPresetId.value === preset.id
+                  ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                  : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
+                @click="store.selectPreset(preset.id)"
+              >
+                {{ preset.name.replace('Strobe ', '') }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Dimmer Presets -->
+          <div>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Dimmer</span>
+            <div class="flex gap-1.5">
+              <button
+                v-for="preset in dimmerPresets"
+                :key="preset.id"
+                class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
+                       border border-zinc-800"
+                :class="store.selectedPresetId.value === preset.id
+                  ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                  : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
+                @click="store.selectPreset(preset.id)"
+              >
                 {{ preset.name }}
-              </span>
-            </button>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Strobe Buttons -->
-        <div>
-          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Strobe</span>
-          <div class="flex gap-1.5">
-            <button
-              v-for="preset in strobePresets"
-              :key="preset.id"
-              class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
-                     border border-zinc-800"
-              :class="store.selectedPresetId.value === preset.id
-                ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
-                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-              @click="store.selectPreset(preset.id)"
-            >
-              {{ preset.name.replace('Strobe ', '') }}
-            </button>
+          <!-- Custom Presets -->
+          <div v-if="customPresets.length > 0">
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Custom</span>
+            <div class="grid grid-cols-4 gap-1.5">
+              <button
+                v-for="preset in customPresets"
+                :key="preset.id"
+                class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
+                       border-2 flex items-center justify-center"
+                :class="store.selectedPresetId.value === preset.id
+                  ? 'border-white scale-105 z-10'
+                  : 'border-transparent hover:scale-105'"
+                :style="{
+                  background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
+                  boxShadow: store.selectedPresetId.value === preset.id
+                    ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
+                    : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
+                }"
+                :title="preset.name"
+                @click="store.selectPreset(preset.id)"
+              >
+                <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
+                  {{ preset.name }}
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
 
-        <!-- Dimmer Presets -->
-        <div>
-          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Dimmer</span>
-          <div class="flex gap-1.5">
-            <button
-              v-for="preset in dimmerPresets"
-              :key="preset.id"
-              class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
-                     border border-zinc-800"
-              :class="store.selectedPresetId.value === preset.id
-                ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
-                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-              @click="store.selectPreset(preset.id)"
-            >
-              {{ preset.name }}
-            </button>
-          </div>
-        </div>
-
-        <!-- Custom Presets -->
-        <div v-if="customPresets.length > 0">
-          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Custom</span>
-          <div class="grid grid-cols-4 gap-1.5">
-            <button
-              v-for="preset in customPresets"
-              :key="preset.id"
-              class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
-                     border-2 flex items-center justify-center"
-              :class="store.selectedPresetId.value === preset.id
-                ? 'border-white scale-105 z-10'
-                : 'border-transparent hover:scale-105'"
-              :style="{
-                background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
-                boxShadow: store.selectedPresetId.value === preset.id
-                  ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
-                  : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
-              }"
-              :title="preset.name"
-              @click="store.selectPreset(preset.id)"
-            >
-              <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
-                {{ preset.name }}
-              </span>
-            </button>
-          </div>
-        </div>
-
-        <!-- Add Custom Preset Button -->
-        <button
-          class="w-full py-2.5 rounded-lg border border-dashed border-zinc-600
-                 text-zinc-400 text-xs font-medium
-                 hover:border-green-500/50 hover:text-green-400
-                 hover:bg-green-500/5 hover:shadow-[0_0_20px_#22c55e08]
-                 transition-all duration-300"
-          @click="showAddPreset = true"
-        >
-          + Add Custom Preset
-        </button>
-      </div>
-    </section>
-
-    <!-- ═══════════════════════════════════════════════════════════
-         SCENES SECTION
-         ═══════════════════════════════════════════════════════════ -->
-    <section class="border-b border-zinc-800/50">
-      <!-- Section Header with LED indicator -->
-      <button
-        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
-               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
-        @click="scenesExpanded = !scenesExpanded"
-      >
-        <div
-          class="w-2 h-2 rounded-full transition-all duration-300"
-          :class="store.scenes.value.length > 0
-            ? 'bg-green-500 shadow-[0_0_8px_#22c55e]'
-            : 'bg-zinc-700'"
-        />
-        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Scenes</span>
-        <span class="ml-auto text-xs font-mono text-zinc-500">
-          {{ String(store.scenes.value.length).padStart(2, '0') }}
-        </span>
-        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
-              :class="scenesExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
-      </button>
-
-      <div v-if="scenesExpanded" class="px-2 py-2">
-        <div
-          v-for="scene in store.scenes.value"
-          :key="scene.id"
-          class="group flex flex-col gap-0.5 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
-                 border-l-2"
-          :class="store.selectedSceneId.value === scene.id
-            ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
-            : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
-          @click="store.selectScene(scene.id)"
-        >
-          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
-                :class="{ 'text-green-400': store.selectedSceneId.value === scene.id }">
-            {{ scene.name }}
-          </span>
-          <span class="text-[10px] font-mono text-zinc-600">
-            {{ scene.tracks.length }} tracks · {{ scene.clips.length }} clips
-          </span>
-        </div>
-
-        <div v-if="store.scenes.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
-          No scenes yet. Save a Set as Scene in the editor.
-        </div>
+          <!-- Add Custom Preset Button -->
+          <button
+            class="w-full py-2.5 rounded-lg border border-dashed border-zinc-600
+                   text-zinc-400 text-xs font-medium
+                   hover:border-green-500/50 hover:text-green-400
+                   hover:bg-green-500/5 hover:shadow-[0_0_20px_#22c55e08]
+                   transition-all duration-300"
+            @click="showAddPreset = true"
+          >
+            + Add Custom Preset
+          </button>
+        </template>
       </div>
     </section>
 
@@ -340,6 +350,56 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
 </template>
 
 <style scoped>
+/* Channel sliders for Laser */
+.channel-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 12px;
+  background: #22232b;
+  border: 1px solid #383944;
+  border-radius: 6px;
+}
+
+.channel-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.channel-name {
+  font-size: 11px;
+  font-weight: 500;
+  color: #f0f0f5;
+}
+
+.channel-desc {
+  font-size: 9px;
+  color: #8888a0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.channel-control {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.channel-slider {
+  flex: 1;
+  height: 6px;
+  cursor: pointer;
+  accent-color: #8b5cf6;
+}
+
+.channel-value {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 28px;
+  text-align: right;
+  color: #8b5cf6;
+}
+
 /* Dialog-specific styles */
 .slider-row {
   display: flex;

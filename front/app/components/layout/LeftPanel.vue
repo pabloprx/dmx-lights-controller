@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
-import { TRACK_COLORS } from '~/types/dmx'
+import { TRACK_COLORS, DEVICE_PROFILES, getProfileById } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -11,25 +11,39 @@ const store = useDMXStore()
 
 const devicesExpanded = ref(true)
 const groupsExpanded = ref(true)
+const scenesExpanded = ref(true)
 
 // Add device dialog
 const showAddDevice = ref(false)
 const newDeviceName = ref('')
 const newDeviceChannel = ref(1)
+const newDeviceProfileId = ref('pinspot-rgbw-5ch')
 
 function handleAddDevice() {
   if (!newDeviceName.value.trim()) return
 
+  const profile = getProfileById(newDeviceProfileId.value)
+  const channelCount = profile?.channelCount || 5
+
   store.addDevice({
     name: newDeviceName.value.trim(),
-    profileId: 'pinspot-rgbw-5ch',
+    profileId: newDeviceProfileId.value,
     startChannel: newDeviceChannel.value,
     tags: [],
   })
 
   newDeviceName.value = ''
-  newDeviceChannel.value = Math.min(512, newDeviceChannel.value + 5)
+  newDeviceChannel.value = Math.min(512, newDeviceChannel.value + channelCount)
   showAddDevice.value = false
+}
+
+// Get short profile label for device list
+function getProfileLabel(profileId: string): string {
+  const profile = getProfileById(profileId)
+  if (!profile) return '?'
+  if (profileId === 'pinspot-rgbw-5ch') return 'RGBW'
+  if (profileId === 'laser-10ch') return 'LASER'
+  return profile.name.substring(0, 4).toUpperCase()
 }
 
 // Add group dialog
@@ -37,12 +51,25 @@ const showAddGroup = ref(false)
 const newGroupName = ref('')
 const selectedDevicesForGroup = ref<string[]>([])
 
+// Get profile from first selected device
+const groupProfileId = computed(() => {
+  if (selectedDevicesForGroup.value.length === 0) return null
+  const firstDevice = store.devices.value.find(d => d.id === selectedDevicesForGroup.value[0])
+  return firstDevice?.profileId || null
+})
+
+// Filter devices that match the selected profile (for group consistency)
+const compatibleDevicesForGroup = computed(() => {
+  if (!groupProfileId.value) return store.devices.value
+  return store.devices.value.filter(d => d.profileId === groupProfileId.value)
+})
+
 function handleAddGroup() {
-  if (!newGroupName.value.trim() || selectedDevicesForGroup.value.length === 0) return
+  if (!newGroupName.value.trim() || selectedDevicesForGroup.value.length === 0 || !groupProfileId.value) return
 
   store.addGroup({
     name: newGroupName.value.trim(),
-    profileId: 'pinspot-rgbw-5ch',
+    profileId: groupProfileId.value,
     deviceIds: [...selectedDevicesForGroup.value],
     color: TRACK_COLORS[store.groups.value.length % TRACK_COLORS.length],
   })
@@ -59,6 +86,12 @@ function toggleDeviceForGroup(deviceId: string) {
   } else {
     selectedDevicesForGroup.value.splice(idx, 1)
   }
+}
+
+function isDeviceCompatibleForGroup(deviceId: string): boolean {
+  if (!groupProfileId.value) return true
+  const device = store.devices.value.find(d => d.id === deviceId)
+  return device?.profileId === groupProfileId.value
 }
 </script>
 
@@ -94,18 +127,26 @@ function toggleDeviceForGroup(deviceId: string) {
         <div
           v-for="device in store.devices.value"
           :key="device.id"
-          class="group flex items-center gap-3 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
+          class="group flex items-center gap-2 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
                  border-l-2"
           :class="store.selectedDeviceId.value === device.id
             ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
             : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
           @click="store.selectDevice(device.id)"
         >
-          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
+          <span
+            class="px-1.5 py-0.5 text-[9px] font-bold rounded"
+            :class="device.profileId === 'laser-10ch'
+              ? 'bg-purple-500/20 text-purple-400'
+              : 'bg-cyan-500/20 text-cyan-400'"
+          >
+            {{ getProfileLabel(device.profileId) }}
+          </span>
+          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors truncate"
                 :class="{ 'text-green-400': store.selectedDeviceId.value === device.id }">
             {{ device.name }}
           </span>
-          <span class="ml-auto text-xs font-mono text-zinc-600">CH {{ device.startChannel }}</span>
+          <span class="ml-auto text-[10px] font-mono text-zinc-500 shrink-0">CH{{ device.startChannel }}</span>
         </div>
 
         <div v-if="store.devices.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
@@ -195,6 +236,56 @@ function toggleDeviceForGroup(deviceId: string) {
       </div>
     </section>
 
+    <!-- ═══════════════════════════════════════════════════════════
+         SCENES SECTION
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="border-b border-zinc-800/50">
+      <!-- Section Header with LED indicator -->
+      <button
+        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
+               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
+        @click="scenesExpanded = !scenesExpanded"
+      >
+        <div
+          class="w-2 h-2 rounded-full transition-all duration-300"
+          :class="store.scenes.value.length > 0
+            ? 'bg-green-500 shadow-[0_0_8px_#22c55e]'
+            : 'bg-zinc-700'"
+        />
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Scenes</span>
+        <span class="ml-auto text-xs font-mono text-zinc-500">
+          {{ String(store.scenes.value.length).padStart(2, '0') }}
+        </span>
+        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
+              :class="scenesExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
+      </button>
+
+      <div v-if="scenesExpanded" class="px-2 py-2">
+        <div
+          v-for="scene in store.scenes.value"
+          :key="scene.id"
+          class="group flex flex-col gap-0.5 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
+                 border-l-2"
+          :class="store.selectedSceneId.value === scene.id
+            ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
+            : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
+          @click="store.selectScene(scene.id)"
+        >
+          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
+                :class="{ 'text-green-400': store.selectedSceneId.value === scene.id }">
+            {{ scene.name }}
+          </span>
+          <span class="text-[10px] font-mono text-zinc-500">
+            {{ scene.tracks.length }} tracks · {{ scene.clips.length }} clips
+          </span>
+        </div>
+
+        <div v-if="store.scenes.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
+          No scenes yet. Save a Set as Scene in the editor.
+        </div>
+      </div>
+    </section>
+
     <!-- Add Device Dialog -->
     <Dialog :open="showAddDevice" @update:open="showAddDevice = $event">
       <DialogContent class="sm:max-w-md">
@@ -204,11 +295,27 @@ function toggleDeviceForGroup(deviceId: string) {
 
         <div class="grid gap-4 py-4">
           <div class="grid gap-2">
+            <Label>Profile</Label>
+            <div class="profile-picker">
+              <button
+                v-for="profile in DEVICE_PROFILES"
+                :key="profile.id"
+                class="profile-option"
+                :class="{ selected: newDeviceProfileId === profile.id }"
+                @click="newDeviceProfileId = profile.id"
+              >
+                <span class="profile-name">{{ profile.name }}</span>
+                <span class="profile-channels">{{ profile.channelCount }}ch</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="grid gap-2">
             <Label for="device-name">Name</Label>
             <Input
               id="device-name"
               v-model="newDeviceName"
-              placeholder="e.g. Pinspot 1"
+              :placeholder="newDeviceProfileId === 'laser-10ch' ? 'e.g. Laser 1' : 'e.g. Pinspot 1'"
               @keyup.enter="handleAddDevice"
             />
           </div>
@@ -251,19 +358,29 @@ function toggleDeviceForGroup(deviceId: string) {
           </div>
 
           <div class="grid gap-2">
-            <Label>Select Devices</Label>
+            <Label>Select Devices <span v-if="groupProfileId" class="text-zinc-500 font-normal">({{ getProfileLabel(groupProfileId) }} only)</span></Label>
             <div class="device-picker">
               <div
                 v-for="device in store.devices.value"
                 :key="device.id"
                 class="device-option"
-                @click="toggleDeviceForGroup(device.id)"
+                :class="{ incompatible: !isDeviceCompatibleForGroup(device.id) }"
+                @click="isDeviceCompatibleForGroup(device.id) && toggleDeviceForGroup(device.id)"
               >
                 <Checkbox
                   :checked="selectedDevicesForGroup.includes(device.id)"
-                  @update:checked="toggleDeviceForGroup(device.id)"
+                  :disabled="!isDeviceCompatibleForGroup(device.id)"
+                  @update:checked="isDeviceCompatibleForGroup(device.id) && toggleDeviceForGroup(device.id)"
                 />
-                <span class="ml-2">{{ device.name }}</span>
+                <span
+                  class="ml-2 px-1.5 py-0.5 text-[9px] font-bold rounded"
+                  :class="device.profileId === 'laser-10ch'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : 'bg-cyan-500/20 text-cyan-400'"
+                >
+                  {{ getProfileLabel(device.profileId) }}
+                </span>
+                <span class="ml-1">{{ device.name }}</span>
               </div>
             </div>
           </div>
@@ -281,6 +398,53 @@ function toggleDeviceForGroup(deviceId: string) {
 </template>
 
 <style scoped>
+/* Profile picker */
+.profile-picker {
+  display: flex;
+  gap: 8px;
+}
+
+.profile-option {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 8px;
+  border: 1px solid #383944;
+  border-radius: 8px;
+  background: #22232b;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.profile-option:hover {
+  background: #2a2b35;
+  border-color: #22c55e40;
+}
+
+.profile-option.selected {
+  background: #22c55e15;
+  border-color: #22c55e;
+  box-shadow: 0 0 15px #22c55e20;
+}
+
+.profile-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: #f0f0f5;
+}
+
+.profile-option.selected .profile-name {
+  color: #22c55e;
+}
+
+.profile-channels {
+  font-size: 10px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #8888a0;
+}
+
 /* Device picker in dialog */
 .device-picker {
   max-height: 192px;
@@ -301,5 +465,10 @@ function toggleDeviceForGroup(deviceId: string) {
 
 .device-option:hover {
   background: #2a2b35;
+}
+
+.device-option.incompatible {
+  opacity: 0.4;
+  pointer-events: none;
 }
 </style>

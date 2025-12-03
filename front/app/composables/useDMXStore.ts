@@ -4,8 +4,8 @@ import type {
   Set, SetTrack, SetClip, Playlist, PresetValues, SetLength
 } from '~/types/dmx'
 import {
-  PINSPOT_RGBW, BUILT_IN_PRESETS, TRACK_COLORS,
-  generateId, createDefaultSet, createDefaultTrack, valuesToDMX
+  DEVICE_PROFILES, BUILT_IN_PRESETS, TRACK_COLORS,
+  generateId, createDefaultSet, createDefaultTrack, valuesToDMX, getProfileById
 } from '~/types/dmx'
 
 const STORAGE_KEY = 'dmx-store-v3'
@@ -13,7 +13,7 @@ const STORAGE_KEY = 'dmx-store-v3'
 // ═══════════════════════════════════════════════════════════════
 // SHARED STATE (singleton)
 // ═══════════════════════════════════════════════════════════════
-const profiles = ref<DeviceProfile[]>([PINSPOT_RGBW])
+const profiles = ref<DeviceProfile[]>(DEVICE_PROFILES)
 const devices = ref<Device[]>([])
 const groups = ref<Group[]>([])
 const presets = ref<Preset[]>([...BUILT_IN_PRESETS]) // Start with built-in
@@ -505,8 +505,14 @@ export function useDMXStore() {
   // DMX HELPERS
   // ═══════════════════════════════════════════════════════════════
   function getProfile(profileId: string): DeviceProfile | null {
-    return profiles.value.find(p => p.id === profileId) || null
+    return getProfileById(profileId) || null
   }
+
+  // Get profile for selected device
+  const selectedDeviceProfile = computed(() => {
+    if (!selectedDevice.value) return null
+    return getProfile(selectedDevice.value.profileId)
+  })
 
   // Get all devices for a target (resolves group to devices)
   function getTargetDevices(targetType: 'device' | 'group', targetId: string): Device[] {
@@ -601,6 +607,7 @@ export function useDMXStore() {
     selectedScene,
     selectedSet,
     activeSet,
+    selectedDeviceProfile,
     presetsByProfile,
     presetsByCategory,
 
