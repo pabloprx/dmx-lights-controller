@@ -65,18 +65,21 @@ function toggleRight() {
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════════════════════
+   NEON STUDIO - App Layout
+   ═══════════════════════════════════════════════════════════ */
+
 .app-layout {
   display: flex;
   height: 100%;
   width: 100%;
   overflow: hidden;
-  background: hsl(var(--background));
+  background: var(--background);
 }
 
 .panel {
   display: flex;
-  background: hsl(var(--card));
-  border-color: hsl(var(--border));
+  background: var(--card);
   transition: width 0.2s ease, min-width 0.2s ease;
   position: relative;
 }
@@ -84,15 +87,25 @@ function toggleRight() {
 .panel-left {
   width: 240px;
   min-width: 240px;
-  border-right: 1px solid hsl(var(--border));
   flex-direction: row;
+  /* Neon glow border */
+  border-right: 1px solid #22c55e30;
+  box-shadow:
+    1px 0 0 #22c55e20,
+    2px 0 20px #22c55e10,
+    inset -1px 0 0 #22c55e10;
 }
 
 .panel-right {
   width: 280px;
   min-width: 280px;
-  border-left: 1px solid hsl(var(--border));
   flex-direction: row-reverse;
+  /* Neon glow border */
+  border-left: 1px solid #22c55e30;
+  box-shadow:
+    -1px 0 0 #22c55e20,
+    -2px 0 20px #22c55e10,
+    inset 1px 0 0 #22c55e10;
 }
 
 .panel.collapsed {
@@ -122,15 +135,17 @@ function toggleRight() {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
+  background: #22232b;
+  border: 1px solid #383944;
   cursor: pointer;
   z-index: 10;
-  transition: background 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .panel-toggle:hover {
-  background: hsl(var(--accent));
+  background: #2a2b35;
+  border-color: #22c55e40;
+  box-shadow: 0 0 15px #22c55e20;
 }
 
 .panel-toggle-left {
@@ -148,7 +163,12 @@ function toggleRight() {
 .toggle-icon {
   font-size: 14px;
   font-weight: bold;
-  color: hsl(var(--muted-foreground));
+  color: #8888a0;
+  transition: color 0.2s ease;
+}
+
+.panel-toggle:hover .toggle-icon {
+  color: #22c55e;
 }
 
 .main-content {
@@ -157,5 +177,6 @@ function toggleRight() {
   flex-direction: column;
   overflow: hidden;
   min-width: 0;
+  background: var(--background);
 }
 </style>

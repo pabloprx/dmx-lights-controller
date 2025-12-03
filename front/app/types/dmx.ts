@@ -69,18 +69,31 @@ export interface Preset {
 }
 
 // ═══════════════════════════════════════════════════════════════
-// SCENE (static frame - group/device + preset assignments)
+// SCENE (blueprint template - reusable track + clip configurations)
+// Scenes are like "mini-Set templates" that can be loaded into any Set
 // ═══════════════════════════════════════════════════════════════
-export interface SceneAssignment {
+export interface SceneTrack {
+  id: string
+  name: string
   targetType: 'device' | 'group'
   targetId: string                // deviceId or groupId
+  color: string
+}
+
+export interface SceneClip {
+  id: string
+  trackId: string                 // Reference to SceneTrack.id
   presetId: string
+  startBeat: number
+  duration: number
 }
 
 export interface Scene {
   id: string
   name: string
-  assignments: SceneAssignment[]  // Which devices/groups get which presets
+  length: SetLength                // Beat length of the scene template
+  tracks: SceneTrack[]            // Track definitions
+  clips: SceneClip[]              // Clip placements
 }
 
 // ═══════════════════════════════════════════════════════════════

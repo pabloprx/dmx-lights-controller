@@ -4,6 +4,10 @@ import { useSetPlayer } from '~/composables/useSetPlayer'
 import { useClipDrag } from '~/composables/useClipDrag'
 import { TRACK_COLORS } from '~/types/dmx'
 import type { SetClip } from '~/types/dmx'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Label } from '@/components/ui/label'
+import { Input } from '@/components/ui/input'
 
 const store = useDMXStore()
 const player = useSetPlayer()
@@ -50,6 +54,30 @@ function handleAddTrack() {
   store.addTrackToSet(currentSet.value.id, trackTargetType.value, trackTargetId.value)
   trackTargetId.value = ''
   showAddTrack.value = false
+}
+
+// Save Scene dialog
+const showSaveScene = ref(false)
+const newSceneName = ref('')
+
+function handleSaveAsScene() {
+  if (!currentSet.value || !newSceneName.value.trim()) return
+
+  store.saveSetAsScene(currentSet.value.id, newSceneName.value.trim())
+  newSceneName.value = ''
+  showSaveScene.value = false
+}
+
+// Load Scene dialog
+const showLoadScene = ref(false)
+const selectedSceneToLoad = ref<string | null>(null)
+
+function handleLoadScene() {
+  if (!currentSet.value || !selectedSceneToLoad.value) return
+
+  store.loadSceneToSet(currentSet.value.id, selectedSceneToLoad.value)
+  selectedSceneToLoad.value = null
+  showLoadScene.value = false
 }
 
 // Get clips for a track
@@ -181,6 +209,26 @@ function handleClipMouseMove(event: MouseEvent) {
           {{ store.activeSetId.value === currentSet?.id ? 'Active' : 'Set Active' }}
         </button>
 
+        <span class="divider" />
+
+        <!-- Scene buttons -->
+        <button
+          class="scene-button"
+          :disabled="!currentSet || currentSet.tracks.length === 0"
+          @click="showSaveScene = true"
+        >
+          💾 Save Scene
+        </button>
+        <button
+          class="scene-button"
+          :disabled="!currentSet || store.scenes.value.length === 0"
+          @click="showLoadScene = true"
+        >
+          📂 Load Scene
+        </button>
+
+        <span class="divider" />
+
         <span class="set-length">{{ currentSet?.length || 8 }} beats</span>
         <span class="current-beat">Beat: {{ player.beatInSet.value }}</span>
       </div>
@@ -283,24 +331,30 @@ function handleClipMouseMove(event: MouseEvent) {
     </div>
 
     <!-- Add Track Dialog -->
-    <Teleport to="body">
-      <div v-if="showAddTrack" class="dialog-overlay" @click.self="showAddTrack = false">
-        <div class="dialog">
-          <h3 class="dialog-title">Add Track</h3>
+    <Dialog :open="showAddTrack" @update:open="showAddTrack = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Track</DialogTitle>
+        </DialogHeader>
 
-          <div class="form-group">
-            <label>Target Type</label>
-            <div class="toggle-group">
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label>Target Type</Label>
+            <div class="flex gap-2">
               <button
-                class="toggle-btn"
-                :class="{ active: trackTargetType === 'device' }"
+                class="flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all border"
+                :class="trackTargetType === 'device'
+                  ? 'bg-green-500/20 text-green-400 border-green-500'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-300'"
                 @click="trackTargetType = 'device'; trackTargetId = ''"
               >
                 Device
               </button>
               <button
-                class="toggle-btn"
-                :class="{ active: trackTargetType === 'group' }"
+                class="flex-1 px-4 py-2 rounded-md text-sm font-medium transition-all border"
+                :class="trackTargetType === 'group'
+                  ? 'bg-green-500/20 text-green-400 border-green-500'
+                  : 'bg-zinc-800 text-zinc-400 border-zinc-700 hover:bg-zinc-700 hover:text-zinc-300'"
                 @click="trackTargetType = 'group'; trackTargetId = ''"
               >
                 Group
@@ -308,20 +362,22 @@ function handleClipMouseMove(event: MouseEvent) {
             </div>
           </div>
 
-          <div class="form-group">
-            <label>{{ trackTargetType === 'device' ? 'Select Device' : 'Select Group' }}</label>
-            <div class="target-picker">
+          <div class="grid gap-2">
+            <Label>{{ trackTargetType === 'device' ? 'Select Device' : 'Select Group' }}</Label>
+            <div class="max-h-48 overflow-y-auto border border-zinc-700 rounded-lg bg-zinc-900">
               <template v-if="trackTargetType === 'device'">
                 <div
                   v-for="device in store.devices.value"
                   :key="device.id"
-                  class="target-option"
-                  :class="{ selected: trackTargetId === device.id }"
+                  class="flex items-center gap-2 px-3 py-2.5 cursor-pointer text-sm transition-colors"
+                  :class="trackTargetId === device.id
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'text-zinc-300 hover:bg-zinc-800'"
                   @click="trackTargetId = device.id"
                 >
                   {{ device.name }}
                 </div>
-                <div v-if="store.devices.value.length === 0" class="empty-picker">
+                <div v-if="store.devices.value.length === 0" class="p-4 text-center text-zinc-500 text-xs">
                   No devices. Add some in the left panel.
                 </div>
               </template>
@@ -329,42 +385,110 @@ function handleClipMouseMove(event: MouseEvent) {
                 <div
                   v-for="group in store.groups.value"
                   :key="group.id"
-                  class="target-option"
-                  :class="{ selected: trackTargetId === group.id }"
+                  class="flex items-center gap-2 px-3 py-2.5 cursor-pointer text-sm transition-colors"
+                  :class="trackTargetId === group.id
+                    ? 'bg-green-500/20 text-green-400'
+                    : 'text-zinc-300 hover:bg-zinc-800'"
                   @click="trackTargetId = group.id"
                 >
-                  <span class="group-dot" :style="{ backgroundColor: group.color }" />
+                  <span class="w-2.5 h-2.5 rounded-sm" :style="{ backgroundColor: group.color }" />
                   {{ group.name }}
                 </div>
-                <div v-if="store.groups.value.length === 0" class="empty-picker">
+                <div v-if="store.groups.value.length === 0" class="p-4 text-center text-zinc-500 text-xs">
                   No groups. Add some in the left panel.
                 </div>
               </template>
             </div>
           </div>
+        </div>
 
-          <div class="dialog-actions">
-            <button class="btn btn-ghost" @click="showAddTrack = false">Cancel</button>
-            <button
-              class="btn btn-primary"
-              :disabled="!trackTargetId"
-              @click="handleAddTrack"
-            >
-              Add Track
-            </button>
+        <DialogFooter>
+          <Button variant="outline" @click="showAddTrack = false">Cancel</Button>
+          <Button :disabled="!trackTargetId" @click="handleAddTrack">Add Track</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Save Scene Dialog -->
+    <Dialog :open="showSaveScene" @update:open="showSaveScene = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Save as Scene</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-4">
+          <p class="scene-info">
+            Saves current tracks ({{ currentSet?.tracks.length || 0 }}) and clips ({{ currentSet?.clips.length || 0 }})
+            as a reusable blueprint.
+          </p>
+          <div class="grid gap-2">
+            <Label for="scene-name">Scene Name</Label>
+            <Input
+              id="scene-name"
+              v-model="newSceneName"
+              placeholder="e.g. Left-Right Strobe"
+              @keyup.enter="handleSaveAsScene"
+            />
           </div>
         </div>
-      </div>
-    </Teleport>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showSaveScene = false">Cancel</Button>
+          <Button :disabled="!newSceneName.trim()" @click="handleSaveAsScene">Save Scene</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Load Scene Dialog -->
+    <Dialog :open="showLoadScene" @update:open="showLoadScene = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Load Scene</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-4">
+          <p class="scene-warning">
+            ⚠️ This will replace all tracks and clips in the current Set.
+          </p>
+          <div class="grid gap-2">
+            <Label>Select Scene</Label>
+            <div class="scene-picker">
+              <div
+                v-for="scene in store.scenes.value"
+                :key="scene.id"
+                class="scene-option"
+                :class="{ selected: selectedSceneToLoad === scene.id }"
+                @click="selectedSceneToLoad = scene.id"
+              >
+                <span class="scene-option-name">{{ scene.name }}</span>
+                <span class="scene-option-info">{{ scene.tracks.length }} tracks · {{ scene.clips.length }} clips</span>
+              </div>
+              <div v-if="store.scenes.value.length === 0" class="empty-picker">
+                No scenes saved yet.
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showLoadScene = false">Cancel</Button>
+          <Button :disabled="!selectedSceneToLoad" @click="handleLoadScene">Load Scene</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
+/* ═══════════════════════════════════════════════════════════
+   NEON STUDIO - Set Editor / Timeline
+   ═══════════════════════════════════════════════════════════ */
+
 .set-editor {
   display: flex;
   flex-direction: column;
   height: 100%;
-  background: hsl(var(--background));
+  background: #1a1b21;
 }
 
 /* Header */
@@ -373,8 +497,9 @@ function handleClipMouseMove(event: MouseEvent) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 16px;
-  border-bottom: 1px solid hsl(var(--border));
-  background: hsl(var(--card));
+  border-bottom: 1px solid #22c55e20;
+  background: #22232b;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.3);
 }
 
 .set-selector {
@@ -386,24 +511,27 @@ function handleClipMouseMove(event: MouseEvent) {
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
+  background: #2a2b35;
+  border: 1px solid #383944;
   border-radius: 6px;
   cursor: pointer;
-  color: hsl(var(--foreground));
+  color: #f0f0f5;
+  transition: all 0.2s ease;
 }
 
 .set-name-button:hover {
-  background: hsl(var(--accent));
+  background: #22c55e10;
+  border-color: #22c55e40;
 }
 
 .set-name {
   font-weight: 600;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .chevron {
   font-size: 10px;
-  color: hsl(var(--muted-foreground));
+  color: #8888a0;
 }
 
 .set-dropdown {
@@ -412,10 +540,10 @@ function handleClipMouseMove(event: MouseEvent) {
   left: 0;
   margin-top: 4px;
   min-width: 160px;
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
+  background: #2a2b35;
+  border: 1px solid #383944;
   border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5), 0 0 15px #22c55e10;
   z-index: 20;
   overflow: hidden;
 }
@@ -426,23 +554,23 @@ function handleClipMouseMove(event: MouseEvent) {
   text-align: left;
   background: none;
   border: none;
-  color: hsl(var(--foreground));
+  color: #f0f0f5;
   cursor: pointer;
   font-size: 13px;
 }
 
 .set-option:hover {
-  background: hsl(var(--accent));
+  background: #22c55e15;
 }
 
 .set-option.selected {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: #22c55e20;
+  color: #22c55e;
 }
 
 .set-option.add-set {
-  border-top: 1px solid hsl(var(--border));
-  color: hsl(var(--primary));
+  border-top: 1px solid #2a2b36;
+  color: #22c55e;
 }
 
 .set-controls {
@@ -455,64 +583,71 @@ function handleClipMouseMove(event: MouseEvent) {
   width: 36px;
   height: 36px;
   border-radius: 50%;
-  border: none;
-  background: hsl(var(--muted));
-  color: hsl(var(--foreground));
+  border: 1px solid #2a2b36;
+  background: #1a1b24;
+  color: #f0f0f5;
   font-size: 16px;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .play-button:hover {
-  background: hsl(var(--accent));
+  background: #22c55e20;
+  border-color: #22c55e40;
 }
 
 .play-button.playing {
   background: #22c55e;
-  color: white;
+  border-color: #22c55e;
+  color: #0a0a0f;
+  box-shadow: 0 0 20px #22c55e60, 0 0 40px #22c55e30;
 }
 
 .activate-button {
   padding: 6px 12px;
   border-radius: 4px;
-  border: 1px solid hsl(var(--border));
-  background: hsl(var(--muted));
-  color: hsl(var(--foreground));
+  border: 1px solid #2a2b36;
+  background: #1a1b24;
+  color: #8888a0;
   font-size: 11px;
   font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s ease;
 }
 
 .activate-button:hover:not(:disabled) {
-  background: hsl(var(--accent));
+  background: #22c55e10;
+  border-color: #22c55e40;
+  color: #f0f0f5;
 }
 
 .activate-button.active {
-  background: hsl(var(--primary));
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: #22c55e20;
+  border-color: #22c55e;
+  color: #22c55e;
+  box-shadow: 0 0 15px #22c55e30;
 }
 
 .activate-button:disabled {
-  opacity: 0.5;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .set-length {
   font-size: 12px;
-  color: hsl(var(--muted-foreground));
-  font-family: monospace;
+  color: #8888a0;
+  font-family: 'JetBrains Mono', monospace;
 }
 
 .current-beat {
   font-size: 12px;
   color: #22c55e;
-  font-family: monospace;
+  font-family: 'JetBrains Mono', monospace;
   font-weight: 600;
+  text-shadow: 0 0 10px #22c55e60;
 }
 
 /* Timeline */
@@ -529,14 +664,15 @@ function handleClipMouseMove(event: MouseEvent) {
   position: sticky;
   top: 0;
   z-index: 10;
-  background: hsl(var(--card));
-  border-bottom: 1px solid hsl(var(--border));
+  background: #22232b;
+  border-bottom: 1px solid #22c55e20;
 }
 
 .track-header-spacer {
   width: 140px;
   min-width: 140px;
-  border-right: 1px solid hsl(var(--border));
+  border-right: 1px solid #383944;
+  background: #22232b;
 }
 
 .beat-number {
@@ -546,14 +682,25 @@ function handleClipMouseMove(event: MouseEvent) {
   text-align: center;
   font-size: 11px;
   font-weight: 600;
-  color: hsl(var(--muted-foreground));
-  border-right: 1px solid hsl(var(--border));
-  transition: all 0.1s ease;
+  font-family: 'JetBrains Mono', monospace;
+  color: #8888a0;
+  border-right: 1px solid #2a2b36;
+  transition: all 0.15s ease;
+}
+
+/* Zebra striping for beat numbers */
+.beat-number:nth-child(odd) {
+  background: #22c55e08;
+}
+
+.beat-number:nth-child(even) {
+  background: #22232b;
 }
 
 .beat-number.current-beat-indicator {
   background: #22c55e;
-  color: white;
+  color: #0a0a0f;
+  box-shadow: 0 0 15px #22c55e50;
 }
 
 /* Tracks */
@@ -563,8 +710,17 @@ function handleClipMouseMove(event: MouseEvent) {
 
 .track-row {
   display: flex;
-  border-bottom: 1px solid hsl(var(--border));
-  min-height: 48px;
+  border-bottom: 1px solid #2a2b36;
+  min-height: 52px;
+}
+
+/* Zebra striping for track rows */
+.track-row:nth-child(odd) {
+  background: #1a1b21;
+}
+
+.track-row:nth-child(even) {
+  background: #1f2027;
 }
 
 .track-header {
@@ -574,14 +730,15 @@ function handleClipMouseMove(event: MouseEvent) {
   align-items: center;
   justify-content: space-between;
   padding: 8px 12px;
-  background: hsl(var(--card));
-  border-right: 1px solid hsl(var(--border));
+  background: #22232b;
+  border-right: 1px solid #383944;
   border-left: 4px solid;
 }
 
 .track-name {
   font-size: 12px;
   font-weight: 500;
+  color: #f0f0f5;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -598,24 +755,30 @@ function handleClipMouseMove(event: MouseEvent) {
   font-size: 10px;
   font-weight: 600;
   border-radius: 3px;
-  border: none;
-  background: hsl(var(--muted));
-  color: hsl(var(--muted-foreground));
+  border: 1px solid #2a2b36;
+  background: #1a1b24;
+  color: #8888a0;
   cursor: pointer;
+  transition: all 0.15s ease;
 }
 
 .track-btn:hover {
-  background: hsl(var(--accent));
+  background: #22c55e15;
+  border-color: #22c55e40;
 }
 
 .track-btn.active {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+  background: #ef4444;
+  border-color: #ef4444;
+  color: white;
+  box-shadow: 0 0 10px #ef444450;
 }
 
 .track-btn.solo.active {
   background: #eab308;
+  border-color: #eab308;
   color: #000;
+  box-shadow: 0 0 10px #eab30850;
 }
 
 /* Beat Cells */
@@ -628,25 +791,34 @@ function handleClipMouseMove(event: MouseEvent) {
   flex: 1;
   min-width: 60px;
   position: relative;
-  border-right: 1px solid hsl(var(--border));
+  border-right: 1px solid #2a2b36;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 0.15s ease;
+}
+
+/* Zebra striping for beat cells - matches beat ruler */
+.beat-cell:nth-child(odd) {
+  background: #22c55e05;
+}
+
+.beat-cell:nth-child(even) {
+  background: transparent;
 }
 
 .beat-cell:hover {
-  background: hsl(var(--accent) / 0.5);
+  background: #22c55e15;
 }
 
 .beat-cell.current-beat-cell {
-  background: rgba(34, 197, 94, 0.15);
-  box-shadow: inset 0 0 0 2px rgba(34, 197, 94, 0.4);
+  background: #22c55e20;
+  box-shadow: inset 0 0 0 1px #22c55e40, inset 0 0 20px #22c55e15;
 }
 
 .beat-cell.clip-continuation {
   pointer-events: none;
 }
 
-/* Clips */
+/* Clips - GLOWING LIGHT BLOCKS */
 .clip {
   position: absolute;
   top: 4px;
@@ -658,29 +830,39 @@ function handleClipMouseMove(event: MouseEvent) {
   padding: 0 6px;
   overflow: hidden;
   z-index: 5;
-  transition: transform 0.05s ease, box-shadow 0.1s ease;
+  transition: transform 0.05s ease, box-shadow 0.15s ease;
   user-select: none;
+  /* Gradient overlay for depth */
+  background-image: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 50%, rgba(0,0,0,0.2) 100%);
+  background-blend-mode: overlay;
 }
 
 .clip:hover {
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  box-shadow:
+    0 2px 8px rgba(0, 0, 0, 0.4),
+    0 0 20px var(--clip-glow, rgba(255,255,255,0.2));
+  transform: translateY(-1px);
 }
 
 .clip.dragging {
-  transform: scale(1.02);
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  transform: scale(1.03) translateY(-2px);
+  box-shadow:
+    0 8px 24px rgba(0, 0, 0, 0.5),
+    0 0 30px var(--clip-glow, rgba(255,255,255,0.3));
   z-index: 10;
 }
 
 .clip-name {
-  font-size: 10px;
-  font-weight: 600;
+  font-size: 9px;
+  font-weight: 700;
   color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   pointer-events: none;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 /* Resize Handles */
@@ -690,6 +872,7 @@ function handleClipMouseMove(event: MouseEvent) {
   bottom: 0;
   width: 8px;
   cursor: ew-resize;
+  transition: background 0.15s ease;
 }
 
 .resize-handle-start {
@@ -703,7 +886,7 @@ function handleClipMouseMove(event: MouseEvent) {
 }
 
 .resize-handle:hover {
-  background: rgba(255, 255, 255, 0.2);
+  background: rgba(255, 255, 255, 0.3);
 }
 
 /* Add Track */
@@ -715,18 +898,20 @@ function handleClipMouseMove(event: MouseEvent) {
   width: 100%;
   padding: 12px;
   background: none;
-  border: 1px dashed hsl(var(--border));
+  border: 1px dashed #2a2b36;
   border-radius: 6px;
-  color: hsl(var(--muted-foreground));
+  color: #8888a0;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.3s ease;
 }
 
 .add-track-button:hover {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
+  border-color: #22c55e50;
+  color: #22c55e;
+  background: #22c55e08;
+  box-shadow: 0 0 20px #22c55e10;
 }
 
 /* Empty State */
@@ -737,148 +922,126 @@ function handleClipMouseMove(event: MouseEvent) {
   align-items: center;
   justify-content: center;
   gap: 16px;
-  color: hsl(var(--muted-foreground));
+  color: #8888a0;
 }
 
-/* Dialog */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.dialog {
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-  padding: 20px;
-  min-width: 320px;
-  max-width: 400px;
-}
-
-.dialog-title {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  color: hsl(var(--muted-foreground));
-}
-
-.toggle-group {
-  display: flex;
-  gap: 8px;
-}
-
-.toggle-btn {
-  flex: 1;
-  padding: 8px;
-  background: hsl(var(--muted));
-  border: 1px solid hsl(var(--border));
-  border-radius: 4px;
-  color: hsl(var(--foreground));
+.empty-state .btn {
+  padding: 10px 20px;
+  background: #22c55e20;
+  border: 1px solid #22c55e;
+  border-radius: 6px;
+  color: #22c55e;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
+  transition: all 0.2s ease;
 }
 
-.toggle-btn:hover {
-  background: hsl(var(--accent));
+.empty-state .btn:hover {
+  background: #22c55e;
+  color: #0a0a0f;
+  box-shadow: 0 0 20px #22c55e50;
 }
 
-.toggle-btn.active {
-  background: hsl(var(--primary));
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+/* Scene controls */
+.divider {
+  width: 1px;
+  height: 20px;
+  background: #2a2b36;
 }
 
-.target-picker {
+.scene-button {
+  padding: 6px 12px;
+  border-radius: 4px;
+  border: 1px solid #2a2b36;
+  background: #1a1b24;
+  color: #f0f0f5;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.scene-button:hover:not(:disabled) {
+  background: #22c55e15;
+  border-color: #22c55e40;
+  color: #22c55e;
+}
+
+.scene-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Scene dialog styles */
+.scene-info {
+  font-size: 13px;
+  color: #8888a0;
+  margin: 0;
+}
+
+.scene-warning {
+  font-size: 13px;
+  color: #eab308;
+  margin: 0;
+  padding: 8px 12px;
+  background: rgba(234, 179, 8, 0.1);
+  border: 1px solid rgba(234, 179, 8, 0.2);
+  border-radius: 6px;
+}
+
+.scene-picker {
   max-height: 200px;
   overflow-y: auto;
-  border: 1px solid hsl(var(--border));
-  border-radius: 4px;
+  border: 1px solid #383944;
+  border-radius: 6px;
+  background: #22232b;
 }
 
-.target-option {
+.scene-option {
   display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 12px;
+  flex-direction: column;
+  gap: 2px;
+  padding: 12px;
   cursor: pointer;
-  font-size: 13px;
-}
-
-.target-option:hover {
-  background: hsl(var(--accent));
-}
-
-.target-option.selected {
-  background: hsl(var(--primary) / 0.1);
-}
-
-.group-dot {
-  width: 10px;
-  height: 10px;
-  border-radius: 2px;
-}
-
-.empty-picker {
-  padding: 16px;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
+  border-bottom: 1px solid #2a2b36;
   transition: all 0.15s ease;
 }
 
-.btn-ghost {
-  background: none;
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground));
+.scene-option:last-child {
+  border-bottom: none;
 }
 
-.btn-ghost:hover {
-  background: hsl(var(--accent));
+.scene-option:hover {
+  background: #1a1b24;
 }
 
-.btn-primary {
-  background: hsl(var(--primary));
-  border: 1px solid hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
+.scene-option.selected {
+  background: #22c55e15;
+  border-left: 2px solid #22c55e;
+  padding-left: 10px;
 }
 
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
+.scene-option-name {
+  font-size: 13px;
+  font-weight: 500;
+  color: #f0f0f5;
 }
 
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+.scene-option.selected .scene-option-name {
+  color: #22c55e;
+}
+
+.scene-option-info {
+  font-size: 11px;
+  color: #8888a0;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.empty-picker {
+  padding: 24px;
+  text-align: center;
+  color: #555566;
+  font-size: 13px;
 }
 </style>

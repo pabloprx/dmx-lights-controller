@@ -1,6 +1,7 @@
 import { ref, computed, watch } from 'vue'
 import type {
-  DeviceProfile, Device, Group, Preset, Scene, Set, SetTrack, SetClip, Playlist, PresetValues
+  DeviceProfile, Device, Group, Preset, Scene, SceneTrack, SceneClip,
+  Set, SetTrack, SetClip, Playlist, PresetValues, SetLength
 } from '~/types/dmx'
 import {
   PINSPOT_RGBW, BUILT_IN_PRESETS, TRACK_COLORS,
@@ -276,6 +277,84 @@ export function useDMXStore() {
 
   function getScene(id: string): Scene | null {
     return scenes.value.find(s => s.id === id) || null
+  }
+
+  // Save current Set as a Scene blueprint
+  function saveSetAsScene(setId: string, sceneName: string): Scene | null {
+    const set = sets.value.find(s => s.id === setId)
+    if (!set) return null
+
+    // Create scene tracks from set tracks (with new IDs)
+    const trackIdMap = new Map<string, string>() // old trackId -> new trackId
+    const sceneTracks: SceneTrack[] = set.tracks.map(track => {
+      const newId = generateId()
+      trackIdMap.set(track.id, newId)
+      return {
+        id: newId,
+        name: track.name,
+        targetType: track.targetType,
+        targetId: track.targetId,
+        color: track.color,
+      }
+    })
+
+    // Create scene clips with remapped track IDs
+    const sceneClips: SceneClip[] = set.clips.map(clip => ({
+      id: generateId(),
+      trackId: trackIdMap.get(clip.trackId) || clip.trackId,
+      presetId: clip.presetId,
+      startBeat: clip.startBeat,
+      duration: clip.duration,
+    }))
+
+    const scene: Scene = {
+      id: generateId(),
+      name: sceneName,
+      length: set.length,
+      tracks: sceneTracks,
+      clips: sceneClips,
+    }
+    scenes.value.push(scene)
+    return scene
+  }
+
+  // Load a Scene blueprint into a Set (replaces existing tracks/clips)
+  function loadSceneToSet(setId: string, sceneId: string): boolean {
+    const set = sets.value.find(s => s.id === setId)
+    const scene = scenes.value.find(s => s.id === sceneId)
+    if (!set || !scene) return false
+
+    // Create set tracks from scene tracks (with new IDs)
+    const trackIdMap = new Map<string, string>() // scene trackId -> new set trackId
+    const newTracks: SetTrack[] = scene.tracks.map(sceneTrack => {
+      const newId = generateId()
+      trackIdMap.set(sceneTrack.id, newId)
+      return {
+        id: newId,
+        name: sceneTrack.name,
+        targetType: sceneTrack.targetType,
+        targetId: sceneTrack.targetId,
+        color: sceneTrack.color,
+        muted: false,
+        solo: false,
+      }
+    })
+
+    // Create set clips with remapped track IDs
+    const newClips: SetClip[] = scene.clips.map(sceneClip => ({
+      id: generateId(),
+      trackId: trackIdMap.get(sceneClip.trackId) || sceneClip.trackId,
+      presetId: sceneClip.presetId,
+      startBeat: sceneClip.startBeat,
+      duration: sceneClip.duration,
+    }))
+
+    // Replace set tracks and clips
+    set.tracks = newTracks
+    set.clips = newClips
+    set.length = scene.length
+
+    return true
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -554,6 +633,8 @@ export function useDMXStore() {
     deleteScene,
     selectScene,
     getScene,
+    saveSetAsScene,
+    loadSceneToSet,
 
     // Set methods
     addSet,

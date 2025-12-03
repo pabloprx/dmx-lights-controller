@@ -1,6 +1,11 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
 import { TRACK_COLORS } from '~/types/dmx'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
 
 const store = useDMXStore()
 
@@ -58,36 +63,62 @@ function toggleDeviceForGroup(deviceId: string) {
 </script>
 
 <template>
-  <div class="left-panel">
-    <!-- Devices Section -->
-    <section class="panel-section">
+  <div class="flex flex-col h-full overflow-y-auto">
+    <!-- ═══════════════════════════════════════════════════════════
+         DEVICES SECTION
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="border-b border-zinc-800/50">
+      <!-- Section Header with LED indicator -->
       <button
-        class="section-header"
+        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
+               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
         @click="devicesExpanded = !devicesExpanded"
       >
-        <span class="section-title">Devices</span>
-        <span class="section-count">{{ store.devices.value.length }}</span>
-        <span class="chevron">{{ devicesExpanded ? '▼' : '▶' }}</span>
+        <!-- LED indicator -->
+        <div
+          class="w-2 h-2 rounded-full transition-all duration-300"
+          :class="store.devices.value.length > 0
+            ? 'bg-green-500 shadow-[0_0_8px_#22c55e]'
+            : 'bg-zinc-700'"
+        />
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Devices</span>
+        <span class="ml-auto text-xs font-mono text-zinc-500">
+          {{ String(store.devices.value.length).padStart(2, '0') }}
+        </span>
+        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
+              :class="devicesExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
       </button>
 
-      <div v-if="devicesExpanded" class="section-content">
+      <!-- Device List -->
+      <div v-if="devicesExpanded" class="px-2 py-2">
         <div
           v-for="device in store.devices.value"
           :key="device.id"
-          class="list-item"
-          :class="{ selected: store.selectedDeviceId.value === device.id }"
+          class="group flex items-center gap-3 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
+                 border-l-2"
+          :class="store.selectedDeviceId.value === device.id
+            ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
+            : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
           @click="store.selectDevice(device.id)"
         >
-          <span class="item-name">{{ device.name }}</span>
-          <span class="item-channel">CH {{ device.startChannel }}</span>
+          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
+                :class="{ 'text-green-400': store.selectedDeviceId.value === device.id }">
+            {{ device.name }}
+          </span>
+          <span class="ml-auto text-xs font-mono text-zinc-600">CH {{ device.startChannel }}</span>
         </div>
 
-        <div v-if="store.devices.value.length === 0" class="empty-state">
+        <div v-if="store.devices.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
           No devices yet
         </div>
 
+        <!-- Add Device Button -->
         <button
-          class="add-button"
+          class="w-full mt-2 py-2.5 rounded-lg border border-dashed border-zinc-600
+                 text-zinc-400 text-xs font-medium
+                 hover:border-green-500/50 hover:text-green-400
+                 hover:bg-green-500/5 hover:shadow-[0_0_20px_#22c55e08]
+                 transition-all duration-300"
           @click="showAddDevice = true"
         >
           + Add Device
@@ -95,39 +126,67 @@ function toggleDeviceForGroup(deviceId: string) {
       </div>
     </section>
 
-    <!-- Groups Section -->
-    <section class="panel-section">
+    <!-- ═══════════════════════════════════════════════════════════
+         GROUPS SECTION
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="border-b border-zinc-800/50">
+      <!-- Section Header with LED indicator -->
       <button
-        class="section-header"
+        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
+               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
         @click="groupsExpanded = !groupsExpanded"
       >
-        <span class="section-title">Groups</span>
-        <span class="section-count">{{ store.groups.value.length }}</span>
-        <span class="chevron">{{ groupsExpanded ? '▼' : '▶' }}</span>
+        <!-- LED indicator -->
+        <div
+          class="w-2 h-2 rounded-full transition-all duration-300"
+          :class="store.groups.value.length > 0
+            ? 'bg-green-500 shadow-[0_0_8px_#22c55e]'
+            : 'bg-zinc-700'"
+        />
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Groups</span>
+        <span class="ml-auto text-xs font-mono text-zinc-500">
+          {{ String(store.groups.value.length).padStart(2, '0') }}
+        </span>
+        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
+              :class="groupsExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
       </button>
 
-      <div v-if="groupsExpanded" class="section-content">
+      <!-- Group List -->
+      <div v-if="groupsExpanded" class="px-2 py-2">
         <div
           v-for="group in store.groups.value"
           :key="group.id"
-          class="list-item group-item"
-          :class="{ selected: store.selectedGroupId.value === group.id }"
+          class="group flex items-center gap-3 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
+                 border-l-2"
+          :class="store.selectedGroupId.value === group.id
+            ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
+            : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
           @click="store.selectGroup(group.id)"
         >
+          <!-- Group color indicator with glow -->
           <span
-            class="group-color"
-            :style="{ backgroundColor: group.color }"
+            class="w-3 h-3 rounded-sm flex-shrink-0 shadow-[0_0_8px_var(--glow-color)]"
+            :style="{ backgroundColor: group.color, '--glow-color': group.color + '60' }"
           />
-          <span class="item-name">{{ group.name }}</span>
-          <span class="item-count">{{ group.deviceIds.length }}</span>
+          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
+                :class="{ 'text-green-400': store.selectedGroupId.value === group.id }">
+            {{ group.name }}
+          </span>
+          <span class="ml-auto text-xs font-mono text-zinc-600">{{ group.deviceIds.length }}</span>
         </div>
 
-        <div v-if="store.groups.value.length === 0" class="empty-state">
+        <div v-if="store.groups.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
           No groups yet
         </div>
 
+        <!-- Add Group Button -->
         <button
-          class="add-button"
+          class="w-full mt-2 py-2.5 rounded-lg border border-dashed border-zinc-600
+                 text-zinc-400 text-xs font-medium
+                 hover:border-green-500/50 hover:text-green-400
+                 hover:bg-green-500/5 hover:shadow-[0_0_20px_#22c55e08]
+                 transition-all duration-300
+                 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:border-zinc-600 disabled:hover:text-zinc-400 disabled:hover:bg-transparent disabled:hover:shadow-none"
           :disabled="store.devices.value.length === 0"
           @click="showAddGroup = true"
         >
@@ -137,350 +196,110 @@ function toggleDeviceForGroup(deviceId: string) {
     </section>
 
     <!-- Add Device Dialog -->
-    <Teleport to="body">
-      <div v-if="showAddDevice" class="dialog-overlay" @click.self="showAddDevice = false">
-        <div class="dialog">
-          <h3 class="dialog-title">Add Device</h3>
+    <Dialog :open="showAddDevice" @update:open="showAddDevice = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Device</DialogTitle>
+        </DialogHeader>
 
-          <div class="form-group">
-            <label>Name</label>
-            <input
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="device-name">Name</Label>
+            <Input
+              id="device-name"
               v-model="newDeviceName"
-              type="text"
               placeholder="e.g. Pinspot 1"
-              class="form-input"
               @keyup.enter="handleAddDevice"
-            >
+            />
           </div>
 
-          <div class="form-group">
-            <label>Start Channel (1-512)</label>
-            <input
+          <div class="grid gap-2">
+            <Label for="device-channel">Start Channel (1-512)</Label>
+            <Input
+              id="device-channel"
               v-model.number="newDeviceChannel"
               type="number"
               min="1"
               max="512"
-              class="form-input"
-            >
-          </div>
-
-          <div class="dialog-actions">
-            <button class="btn btn-ghost" @click="showAddDevice = false">Cancel</button>
-            <button class="btn btn-primary" @click="handleAddDevice">Add</button>
+            />
           </div>
         </div>
-      </div>
-    </Teleport>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showAddDevice = false">Cancel</Button>
+          <Button @click="handleAddDevice">Add</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
 
     <!-- Add Group Dialog -->
-    <Teleport to="body">
-      <div v-if="showAddGroup" class="dialog-overlay" @click.self="showAddGroup = false">
-        <div class="dialog">
-          <h3 class="dialog-title">Add Group</h3>
+    <Dialog :open="showAddGroup" @update:open="showAddGroup = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Group</DialogTitle>
+        </DialogHeader>
 
-          <div class="form-group">
-            <label>Name</label>
-            <input
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="group-name">Name</Label>
+            <Input
+              id="group-name"
               v-model="newGroupName"
-              type="text"
               placeholder="e.g. Left Lights"
-              class="form-input"
               @keyup.enter="handleAddGroup"
-            >
+            />
           </div>
 
-          <div class="form-group">
-            <label>Select Devices</label>
+          <div class="grid gap-2">
+            <Label>Select Devices</Label>
             <div class="device-picker">
               <div
                 v-for="device in store.devices.value"
                 :key="device.id"
                 class="device-option"
-                :class="{ selected: selectedDevicesForGroup.includes(device.id) }"
                 @click="toggleDeviceForGroup(device.id)"
               >
-                <span class="checkbox">{{ selectedDevicesForGroup.includes(device.id) ? '☑' : '☐' }}</span>
-                <span>{{ device.name }}</span>
+                <Checkbox
+                  :checked="selectedDevicesForGroup.includes(device.id)"
+                  @update:checked="toggleDeviceForGroup(device.id)"
+                />
+                <span class="ml-2">{{ device.name }}</span>
               </div>
             </div>
           </div>
-
-          <div class="dialog-actions">
-            <button class="btn btn-ghost" @click="showAddGroup = false">Cancel</button>
-            <button
-              class="btn btn-primary"
-              :disabled="selectedDevicesForGroup.length === 0"
-              @click="handleAddGroup"
-            >
-              Add
-            </button>
-          </div>
         </div>
-      </div>
-    </Teleport>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showAddGroup = false">Cancel</Button>
+          <Button :disabled="selectedDevicesForGroup.length === 0" @click="handleAddGroup">
+            Add
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.left-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-}
-
-.panel-section {
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.section-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  color: hsl(var(--foreground));
-}
-
-.section-header:hover {
-  background: hsl(var(--accent));
-}
-
-.section-title {
-  flex: 1;
-  font-weight: 600;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.section-count {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--muted));
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.chevron {
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
-}
-
-.section-content {
-  padding: 4px 8px 8px;
-}
-
-.list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.list-item:hover {
-  background: hsl(var(--accent));
-}
-
-.list-item.selected {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-channel {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  font-family: monospace;
-}
-
-.list-item.selected .item-channel {
-  color: hsl(var(--primary-foreground) / 0.7);
-}
-
-.group-item {
-  gap: 8px;
-}
-
-.group-color {
-  width: 12px;
-  height: 12px;
-  border-radius: 2px;
-  flex-shrink: 0;
-}
-
-.item-count {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-}
-
-.list-item.selected .item-count {
-  color: hsl(var(--primary-foreground) / 0.7);
-}
-
-.empty-state {
-  padding: 16px;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-}
-
-.add-button {
-  width: 100%;
-  padding: 8px;
-  margin-top: 4px;
-  background: none;
-  border: 1px dashed hsl(var(--border));
-  border-radius: 4px;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.add-button:hover:not(:disabled) {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
-}
-
-.add-button:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-
-/* Dialog styles */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.dialog {
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-  padding: 20px;
-  min-width: 320px;
-  max-width: 400px;
-}
-
-.dialog-title {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.form-group {
-  margin-bottom: 16px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  color: hsl(var(--muted-foreground));
-}
-
-.form-input {
-  width: 100%;
-  padding: 8px 12px;
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
-  border-radius: 4px;
-  color: hsl(var(--foreground));
-  font-size: 14px;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: hsl(var(--primary));
-}
-
+/* Device picker in dialog */
 .device-picker {
-  max-height: 200px;
+  max-height: 192px;
   overflow-y: auto;
-  border: 1px solid hsl(var(--border));
-  border-radius: 4px;
+  border: 1px solid #383944;
+  border-radius: 8px;
+  background: #22232b;
 }
 
 .device-option {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
+  padding: 10px 12px;
   cursor: pointer;
-  font-size: 13px;
+  font-size: 14px;
+  transition: background 0.15s ease;
 }
 
 .device-option:hover {
-  background: hsl(var(--accent));
-}
-
-.device-option.selected {
-  background: hsl(var(--primary) / 0.1);
-}
-
-.checkbox {
-  font-size: 14px;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 20px;
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-ghost {
-  background: none;
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground));
-}
-
-.btn-ghost:hover {
-  background: hsl(var(--accent));
-}
-
-.btn-primary {
-  background: hsl(var(--primary));
-  border: 1px solid hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.btn-primary:hover:not(:disabled) {
-  opacity: 0.9;
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
+  background: #2a2b35;
 }
 </style>

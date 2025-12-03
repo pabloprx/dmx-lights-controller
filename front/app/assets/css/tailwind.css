@@ -1,6 +1,9 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 
+/* Neon Studio Typography */
+@import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600&display=swap');
+
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
@@ -77,37 +80,66 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  /* ═══════════════════════════════════════════════════════════
+     NEON STUDIO - Cyberpunk Lighting Console Theme
+     ═══════════════════════════════════════════════════════════ */
+
+  /* Deep backgrounds - dark but not pure black for better visibility */
+  --background: #1a1b21;
+  --foreground: #f0f0f5;
+
+  /* Panels - elevated surfaces */
+  --card: #22232b;
+  --card-foreground: #f0f0f5;
+  --popover: #2a2b35;
+  --popover-foreground: #f0f0f5;
+
+  /* Primary - Neon Green (the power indicator) */
+  --primary: #22c55e;
+  --primary-foreground: #0a0a0f;
+
+  /* Secondary/muted - cool grays */
+  --secondary: #1a1b24;
+  --secondary-foreground: #f0f0f5;
+  --muted: #12131a;
+  --muted-foreground: #8888a0;
+
+  /* Accent - for hover states */
+  --accent: #1e1f2a;
+  --accent-foreground: #f0f0f5;
+
+  --destructive: #ef4444;
+
+  /* Borders - subtle with glow potential */
+  --border: #2a2b36;
+  --input: #1a1b24;
+  --ring: #22c55e;
+
+  /* Charts - neon palette */
+  --chart-1: #22c55e;
+  --chart-2: #06b6d4;
+  --chart-3: #eab308;
+  --chart-4: #8b5cf6;
+  --chart-5: #ef4444;
+
+  /* Sidebar */
+  --sidebar: #0e0f14;
+  --sidebar-foreground: #f0f0f5;
+  --sidebar-primary: #22c55e;
+  --sidebar-primary-foreground: #0a0a0f;
+  --sidebar-accent: #1a1b24;
+  --sidebar-accent-foreground: #f0f0f5;
+  --sidebar-border: #2a2b36;
+  --sidebar-ring: #22c55e;
+
+  /* Neon Studio custom properties */
+  --neon-green: #22c55e;
+  --neon-cyan: #06b6d4;
+  --neon-red: #ef4444;
+  --neon-amber: #eab308;
+  --neon-purple: #8b5cf6;
+  --glow-green: 0 0 20px #22c55e40, 0 0 40px #22c55e20;
+  --glow-green-intense: 0 0 10px #22c55e60, 0 0 30px #22c55e40, 0 0 60px #22c55e20;
 }
 
 @layer base {
@@ -116,5 +148,44 @@
   }
   body {
     @apply bg-background text-foreground;
+    font-family: 'Inter', system-ui, sans-serif;
   }
+
+  /* Monospace for technical elements */
+  .font-mono, code, kbd, pre {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   NEON STUDIO - Utility Classes
+   ═══════════════════════════════════════════════════════════ */
+
+/* Glow effects */
+.glow-green {
+  box-shadow: 0 0 20px #22c55e40, 0 0 40px #22c55e20;
+}
+
+.glow-green-intense {
+  box-shadow: 0 0 10px #22c55e60, 0 0 30px #22c55e40, 0 0 60px #22c55e20;
+}
+
+.glow-green-subtle {
+  box-shadow: 0 0 15px #22c55e20;
+}
+
+/* LED indicator */
+.led-on {
+  box-shadow: 0 0 8px currentColor, 0 0 16px currentColor;
+}
+
+/* Text glow */
+.text-glow {
+  text-shadow: 0 0 10px currentColor;
+}
+
+/* Neon border effect */
+.border-glow {
+  border-color: #22c55e40;
+  box-shadow: 0 0 15px #22c55e15;
 }

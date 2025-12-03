@@ -37,7 +37,7 @@ function confirmExitPerformance() {
 <template>
   <div
     class="flex items-center gap-5 px-4 py-3 bg-neutral-900 border-b-2 transition-colors"
-    :class="isPerformanceMode ? 'border-red-500' : 'border-neutral-700'"
+    :class="isPerformanceMode ? 'border-red-500' : 'border-neutral-6'"
   >
     <!-- Play/Pause + BPM (shows Link in performance, internal in testing) -->
     <div class="flex items-center gap-3">

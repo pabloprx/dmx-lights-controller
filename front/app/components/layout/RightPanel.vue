@@ -1,6 +1,10 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
 import { getPreviewColor, createDefaultValues } from '~/types/dmx'
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 
 const store = useDMXStore()
 
@@ -54,59 +58,80 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
 </script>
 
 <template>
-  <div class="right-panel">
-    <!-- Presets Section -->
-    <section class="panel-section presets-section">
+  <div class="flex flex-col h-full overflow-y-auto">
+    <!-- ═══════════════════════════════════════════════════════════
+         PRESETS SECTION
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="flex-1 border-b border-zinc-800/50">
+      <!-- Section Header with LED indicator -->
       <button
-        class="section-header"
+        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
+               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
         @click="presetsExpanded = !presetsExpanded"
       >
-        <span class="section-title">Presets</span>
-        <span class="section-count">{{ store.presets.value.length }}</span>
-        <span class="chevron">{{ presetsExpanded ? '▼' : '▶' }}</span>
+        <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Presets</span>
+        <span class="ml-auto text-xs font-mono text-zinc-500">
+          {{ String(store.presets.value.length).padStart(2, '0') }}
+        </span>
+        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
+              :class="presetsExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
       </button>
 
-      <div v-if="presetsExpanded" class="section-content">
+      <div v-if="presetsExpanded" class="px-3 py-3 space-y-4">
         <!-- Master Dimmer -->
-        <div class="dimmer-control">
-          <label>Master</label>
+        <div class="flex items-center gap-3 px-3 py-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
+          <label class="text-xs font-medium text-zinc-400">Master</label>
           <input
             v-model.number="masterDimmer"
             type="range"
             min="0"
             max="100"
-            class="dimmer-slider"
+            class="flex-1 h-1.5 cursor-pointer accent-green-500"
           >
-          <span class="dimmer-value">{{ masterDimmer }}%</span>
+          <span class="text-xs font-mono text-green-400 min-w-[40px] text-right">{{ masterDimmer }}%</span>
         </div>
 
-        <!-- Color Grid -->
-        <div class="preset-group">
-          <span class="preset-group-label">Colors</span>
-          <div class="preset-grid">
+        <!-- Color Grid - GLOWING PADS -->
+        <div>
+          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Colors</span>
+          <div class="grid grid-cols-4 gap-1.5">
             <button
               v-for="preset in colorPresets"
               :key="preset.id"
-              class="preset-button"
-              :class="{ selected: store.selectedPresetId.value === preset.id }"
-              :style="getPresetStyle(preset)"
+              class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
+                     border-2 flex items-center justify-center"
+              :class="store.selectedPresetId.value === preset.id
+                ? 'border-white scale-105 z-10'
+                : 'border-transparent hover:scale-105'"
+              :style="{
+                background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
+                boxShadow: store.selectedPresetId.value === preset.id
+                  ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
+                  : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
+              }"
               :title="preset.name"
               @click="store.selectPreset(preset.id)"
             >
-              <span class="preset-label">{{ preset.name }}</span>
+              <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
+                {{ preset.name }}
+              </span>
             </button>
           </div>
         </div>
 
         <!-- Strobe Buttons -->
-        <div class="preset-group">
-          <span class="preset-group-label">Strobe</span>
-          <div class="preset-row">
+        <div>
+          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Strobe</span>
+          <div class="flex gap-1.5">
             <button
               v-for="preset in strobePresets"
               :key="preset.id"
-              class="preset-button strobe-button"
-              :class="{ selected: store.selectedPresetId.value === preset.id }"
+              class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
+                     border border-zinc-800"
+              :class="store.selectedPresetId.value === preset.id
+                ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
               @click="store.selectPreset(preset.id)"
             >
               {{ preset.name.replace('Strobe ', '') }}
@@ -115,14 +140,17 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
         </div>
 
         <!-- Dimmer Presets -->
-        <div class="preset-group">
-          <span class="preset-group-label">Dimmer</span>
-          <div class="preset-row">
+        <div>
+          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Dimmer</span>
+          <div class="flex gap-1.5">
             <button
               v-for="preset in dimmerPresets"
               :key="preset.id"
-              class="preset-button dimmer-button"
-              :class="{ selected: store.selectedPresetId.value === preset.id }"
+              class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
+                     border border-zinc-800"
+              :class="store.selectedPresetId.value === preset.id
+                ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
               @click="store.selectPreset(preset.id)"
             >
               {{ preset.name }}
@@ -131,25 +159,40 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
         </div>
 
         <!-- Custom Presets -->
-        <div v-if="customPresets.length > 0" class="preset-group">
-          <span class="preset-group-label">Custom</span>
-          <div class="preset-grid">
+        <div v-if="customPresets.length > 0">
+          <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Custom</span>
+          <div class="grid grid-cols-4 gap-1.5">
             <button
               v-for="preset in customPresets"
               :key="preset.id"
-              class="preset-button"
-              :class="{ selected: store.selectedPresetId.value === preset.id }"
-              :style="getPresetStyle(preset)"
+              class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
+                     border-2 flex items-center justify-center"
+              :class="store.selectedPresetId.value === preset.id
+                ? 'border-white scale-105 z-10'
+                : 'border-transparent hover:scale-105'"
+              :style="{
+                background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
+                boxShadow: store.selectedPresetId.value === preset.id
+                  ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
+                  : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
+              }"
               :title="preset.name"
               @click="store.selectPreset(preset.id)"
             >
-              <span class="preset-label">{{ preset.name }}</span>
+              <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
+                {{ preset.name }}
+              </span>
             </button>
           </div>
         </div>
 
+        <!-- Add Custom Preset Button -->
         <button
-          class="add-button"
+          class="w-full py-2.5 rounded-lg border border-dashed border-zinc-600
+                 text-zinc-400 text-xs font-medium
+                 hover:border-green-500/50 hover:text-green-400
+                 hover:bg-green-500/5 hover:shadow-[0_0_20px_#22c55e08]
+                 transition-all duration-300"
           @click="showAddPreset = true"
         >
           + Add Custom Preset
@@ -157,106 +200,127 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
       </div>
     </section>
 
-    <!-- Scenes Section -->
-    <section class="panel-section">
+    <!-- ═══════════════════════════════════════════════════════════
+         SCENES SECTION
+         ═══════════════════════════════════════════════════════════ -->
+    <section class="border-b border-zinc-800/50">
+      <!-- Section Header with LED indicator -->
       <button
-        class="section-header"
+        class="w-full flex items-center gap-3 px-4 py-3 bg-zinc-900/50 border-b border-zinc-800/50
+               hover:bg-zinc-800/50 transition-colors cursor-pointer text-left"
         @click="scenesExpanded = !scenesExpanded"
       >
-        <span class="section-title">Scenes</span>
-        <span class="section-count">{{ store.scenes.value.length }}</span>
-        <span class="chevron">{{ scenesExpanded ? '▼' : '▶' }}</span>
+        <div
+          class="w-2 h-2 rounded-full transition-all duration-300"
+          :class="store.scenes.value.length > 0
+            ? 'bg-green-500 shadow-[0_0_8px_#22c55e]'
+            : 'bg-zinc-700'"
+        />
+        <span class="text-xs font-mono uppercase tracking-widest text-green-400">Scenes</span>
+        <span class="ml-auto text-xs font-mono text-zinc-500">
+          {{ String(store.scenes.value.length).padStart(2, '0') }}
+        </span>
+        <span class="text-zinc-600 text-[10px] transition-transform duration-200"
+              :class="scenesExpanded ? 'rotate-0' : '-rotate-90'">▼</span>
       </button>
 
-      <div v-if="scenesExpanded" class="section-content">
+      <div v-if="scenesExpanded" class="px-2 py-2">
         <div
           v-for="scene in store.scenes.value"
           :key="scene.id"
-          class="list-item"
-          :class="{ selected: store.selectedSceneId.value === scene.id }"
+          class="group flex flex-col gap-0.5 px-3 py-2.5 rounded cursor-pointer transition-all duration-200
+                 border-l-2"
+          :class="store.selectedSceneId.value === scene.id
+            ? 'bg-green-500/10 border-green-500 shadow-[inset_0_0_20px_#22c55e08]'
+            : 'border-transparent hover:bg-zinc-800/40 hover:border-green-500/30'"
           @click="store.selectScene(scene.id)"
         >
-          <span class="item-name">{{ scene.name }}</span>
-          <span class="item-count">{{ scene.assignments.length }} assignments</span>
+          <span class="text-sm text-zinc-300 group-hover:text-white transition-colors"
+                :class="{ 'text-green-400': store.selectedSceneId.value === scene.id }">
+            {{ scene.name }}
+          </span>
+          <span class="text-[10px] font-mono text-zinc-600">
+            {{ scene.tracks.length }} tracks · {{ scene.clips.length }} clips
+          </span>
         </div>
 
-        <div v-if="store.scenes.value.length === 0" class="empty-state">
-          No scenes yet
+        <div v-if="store.scenes.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
+          No scenes yet. Save a Set as Scene in the editor.
         </div>
-
-        <button class="add-button">
-          + Add Scene
-        </button>
       </div>
     </section>
 
     <!-- Add Preset Dialog -->
-    <Teleport to="body">
-      <div v-if="showAddPreset" class="dialog-overlay" @click.self="showAddPreset = false">
-        <div class="dialog">
-          <h3 class="dialog-title">Add Custom Preset</h3>
+    <Dialog :open="showAddPreset" @update:open="showAddPreset = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Add Custom Preset</DialogTitle>
+        </DialogHeader>
 
-          <div class="form-group">
-            <label>Name</label>
-            <input
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="preset-name">Name</Label>
+            <Input
+              id="preset-name"
               v-model="newPresetName"
-              type="text"
               placeholder="e.g. My Color"
-              class="form-input"
-            >
+              @keyup.enter="handleAddPreset"
+            />
           </div>
 
-          <div class="form-group">
-            <label>Dimmer</label>
-            <input
-              v-model.number="newPresetValues.dimmer"
-              type="range"
-              min="0"
-              max="255"
-              class="form-slider"
-            >
-            <span class="slider-value">{{ newPresetValues.dimmer }}</span>
+          <div class="grid gap-2">
+            <Label>Dimmer</Label>
+            <div class="slider-row">
+              <input
+                v-model.number="newPresetValues.dimmer"
+                type="range"
+                min="0"
+                max="255"
+                class="color-slider"
+              >
+              <span class="slider-value">{{ newPresetValues.dimmer }}</span>
+            </div>
           </div>
 
           <div class="color-sliders">
-            <div class="form-group color-group">
-              <label>Red</label>
+            <div class="grid gap-1">
+              <Label>Red</Label>
               <input
                 v-model.number="newPresetValues.red"
                 type="range"
                 min="0"
                 max="255"
-                class="form-slider red"
+                class="color-slider red"
               >
             </div>
-            <div class="form-group color-group">
-              <label>Green</label>
+            <div class="grid gap-1">
+              <Label>Green</Label>
               <input
                 v-model.number="newPresetValues.green"
                 type="range"
                 min="0"
                 max="255"
-                class="form-slider green"
+                class="color-slider green"
               >
             </div>
-            <div class="form-group color-group">
-              <label>Blue</label>
+            <div class="grid gap-1">
+              <Label>Blue</Label>
               <input
                 v-model.number="newPresetValues.blue"
                 type="range"
                 min="0"
                 max="255"
-                class="form-slider blue"
+                class="color-slider blue"
               >
             </div>
-            <div class="form-group color-group">
-              <label>White</label>
+            <div class="grid gap-1">
+              <Label>White</Label>
               <input
                 v-model.number="newPresetValues.white"
                 type="range"
                 min="0"
                 max="255"
-                class="form-slider white"
+                class="color-slider white"
               >
             </div>
           </div>
@@ -264,380 +328,61 @@ function getPresetStyle(preset: typeof store.presets.value[0]) {
           <div class="color-preview" :style="{ backgroundColor: getPreviewColor(newPresetValues) }">
             Preview
           </div>
-
-          <div class="dialog-actions">
-            <button class="btn btn-ghost" @click="showAddPreset = false">Cancel</button>
-            <button class="btn btn-primary" @click="handleAddPreset">Add</button>
-          </div>
         </div>
-      </div>
-    </Teleport>
+
+        <DialogFooter>
+          <Button variant="outline" @click="showAddPreset = false">Cancel</Button>
+          <Button @click="handleAddPreset">Add</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   </div>
 </template>
 
 <style scoped>
-.right-panel {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  overflow-y: auto;
-}
-
-.panel-section {
-  border-bottom: 1px solid hsl(var(--border));
-}
-
-.presets-section {
-  flex: 1;
-}
-
-.section-header {
-  width: 100%;
+/* Dialog-specific styles */
+.slider-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 12px;
-  background: none;
-  border: none;
-  cursor: pointer;
-  text-align: left;
-  color: hsl(var(--foreground));
+  gap: 12px;
 }
 
-.section-header:hover {
-  background: hsl(var(--accent));
-}
-
-.section-title {
+.color-slider {
   flex: 1;
-  font-weight: 600;
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.section-count {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-  background: hsl(var(--muted));
-  padding: 2px 6px;
-  border-radius: 4px;
-}
-
-.chevron {
-  font-size: 10px;
-  color: hsl(var(--muted-foreground));
-}
-
-.section-content {
-  padding: 8px 12px 12px;
-}
-
-/* Dimmer Control */
-.dimmer-control {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  background: hsl(var(--muted));
-  border-radius: 4px;
-  margin-bottom: 12px;
-}
-
-.dimmer-control label {
-  font-size: 12px;
-  font-weight: 500;
-  min-width: 50px;
-}
-
-.dimmer-slider {
-  flex: 1;
-  height: 6px;
-  cursor: pointer;
-}
-
-.dimmer-value {
-  font-size: 12px;
-  font-family: monospace;
-  min-width: 40px;
-  text-align: right;
-}
-
-/* Preset Groups */
-.preset-group {
-  margin-bottom: 12px;
-}
-
-.preset-group-label {
-  display: block;
-  font-size: 11px;
-  font-weight: 500;
-  color: hsl(var(--muted-foreground));
-  margin-bottom: 6px;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-
-.preset-grid {
-  display: grid;
-  grid-template-columns: repeat(4, 1fr);
-  gap: 6px;
-}
-
-.preset-row {
-  display: flex;
-  gap: 6px;
-}
-
-.preset-button {
-  aspect-ratio: 1;
-  border: 2px solid transparent;
-  border-radius: 6px;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s ease;
-  position: relative;
-  overflow: hidden;
-}
-
-.preset-button:hover {
-  transform: scale(1.05);
-}
-
-.preset-button.selected {
-  border-color: hsl(var(--foreground));
-  box-shadow: 0 0 0 2px hsl(var(--background));
-}
-
-.preset-label {
-  font-size: 9px;
-  font-weight: 600;
-  color: white;
-  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  text-transform: uppercase;
-}
-
-.strobe-button,
-.dimmer-button {
-  flex: 1;
-  aspect-ratio: auto;
-  padding: 8px;
-  background: hsl(var(--muted));
-  font-size: 11px;
-  font-weight: 500;
-  color: hsl(var(--foreground));
-}
-
-.strobe-button:hover,
-.dimmer-button:hover {
-  background: hsl(var(--accent));
-  transform: none;
-}
-
-.strobe-button.selected,
-.dimmer-button.selected {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-/* List Items */
-.list-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.list-item:hover {
-  background: hsl(var(--accent));
-}
-
-.list-item.selected {
-  background: hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.item-name {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.item-count {
-  font-size: 11px;
-  color: hsl(var(--muted-foreground));
-}
-
-.list-item.selected .item-count {
-  color: hsl(var(--primary-foreground) / 0.7);
-}
-
-.empty-state {
-  padding: 16px;
-  text-align: center;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-}
-
-.add-button {
-  width: 100%;
-  padding: 8px;
-  margin-top: 8px;
-  background: none;
-  border: 1px dashed hsl(var(--border));
-  border-radius: 4px;
-  color: hsl(var(--muted-foreground));
-  font-size: 12px;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.add-button:hover {
-  border-color: hsl(var(--primary));
-  color: hsl(var(--primary));
-  background: hsl(var(--primary) / 0.1);
-}
-
-/* Dialog styles */
-.dialog-overlay {
-  position: fixed;
-  inset: 0;
-  background: rgba(0, 0, 0, 0.6);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 100;
-}
-
-.dialog {
-  background: hsl(var(--card));
-  border: 1px solid hsl(var(--border));
-  border-radius: 8px;
-  padding: 20px;
-  min-width: 320px;
-  max-width: 400px;
-}
-
-.dialog-title {
-  margin: 0 0 16px;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.form-group {
-  margin-bottom: 12px;
-}
-
-.form-group label {
-  display: block;
-  font-size: 12px;
-  font-weight: 500;
-  margin-bottom: 6px;
-  color: hsl(var(--muted-foreground));
-}
-
-.form-input {
-  width: 100%;
-  padding: 8px 12px;
-  background: hsl(var(--background));
-  border: 1px solid hsl(var(--border));
-  border-radius: 4px;
-  color: hsl(var(--foreground));
-  font-size: 14px;
-}
-
-.form-input:focus {
-  outline: none;
-  border-color: hsl(var(--primary));
-}
-
-.form-slider {
-  width: 100%;
   height: 8px;
+  cursor: pointer;
+  accent-color: #22c55e;
 }
 
 .slider-value {
   font-size: 12px;
-  font-family: monospace;
+  font-family: 'JetBrains Mono', monospace;
+  min-width: 32px;
+  text-align: right;
+  color: #8888a0;
 }
 
 .color-sliders {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 8px;
+  gap: 12px;
 }
 
-.color-group {
-  margin-bottom: 8px;
-}
-
-.form-slider.red::-webkit-slider-thumb {
-  background: #ef4444;
-}
-
-.form-slider.green::-webkit-slider-thumb {
-  background: #22c55e;
-}
-
-.form-slider.blue::-webkit-slider-thumb {
-  background: #3b82f6;
-}
-
-.form-slider.white::-webkit-slider-thumb {
-  background: #ffffff;
-}
+.color-slider.red { accent-color: #ef4444; }
+.color-slider.green { accent-color: #22c55e; }
+.color-slider.blue { accent-color: #3b82f6; }
+.color-slider.white { accent-color: #ffffff; }
 
 .color-preview {
   height: 48px;
-  border-radius: 6px;
+  border-radius: 8px;
   display: flex;
   align-items: center;
   justify-content: center;
   font-size: 12px;
   font-weight: 500;
   color: white;
+  border: 1px solid #2a2b36;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
-  margin-bottom: 16px;
-}
-
-.dialog-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.btn {
-  padding: 8px 16px;
-  border-radius: 4px;
-  font-size: 13px;
-  font-weight: 500;
-  cursor: pointer;
-  transition: all 0.15s ease;
-}
-
-.btn-ghost {
-  background: none;
-  border: 1px solid hsl(var(--border));
-  color: hsl(var(--foreground));
-}
-
-.btn-ghost:hover {
-  background: hsl(var(--accent));
-}
-
-.btn-primary {
-  background: hsl(var(--primary));
-  border: 1px solid hsl(var(--primary));
-  color: hsl(var(--primary-foreground));
-}
-
-.btn-primary:hover {
-  opacity: 0.9;
 }
 </style>
