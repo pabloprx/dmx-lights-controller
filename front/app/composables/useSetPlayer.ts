@@ -4,6 +4,7 @@ import { useAbletonLink } from './useAbletonLink'
 import { useUnifiedSerial } from './useUnifiedSerial'
 import { useDMXStore } from './useDMXStore'
 import { useAppMode } from './useAppMode'
+import { useAudioReactive } from './useAudioReactive'
 import { valuesToDMX } from '~/types/dmx'
 
 // Shared state (singleton)
@@ -18,6 +19,7 @@ export function useSetPlayer() {
   const serial = useUnifiedSerial()
   const store = useDMXStore()
   const appMode = useAppMode()
+  const audioReactive = useAudioReactive()
 
   // Get the current beat based on mode
   const currentBeat = computed(() => {
@@ -76,6 +78,18 @@ export function useSetPlayer() {
     }
   })
 
+  // Watch audio levels for audio-reactive mode (continuous updates)
+  watch(
+    () => serial.audioLevels.value,
+    () => {
+      if (!audioReactive.enabled.value) return
+      if (!isPlaying.value) return
+      if (appMode.blackout.value) return
+      updateDMX()
+    },
+    { deep: true }
+  )
+
   function updateDMX() {
     const set = store.activeSet.value
     if (!set) {
@@ -88,7 +102,12 @@ export function useSetPlayer() {
     const dmxValues = store.getSetDMX(set, beat)
 
     // Only send first 16 channels (hardware limit)
-    const channels = dmxValues.slice(0, 16)
+    let channels = dmxValues.slice(0, 16)
+
+    // Apply audio modulation if enabled
+    if (audioReactive.enabled.value) {
+      channels = audioReactive.applyAudioModulation(channels)
+    }
 
     // Skip if values haven't changed
     if (arraysEqual(channels, lastDMXSent)) {
@@ -197,6 +216,19 @@ export function useSetPlayer() {
     serialConnected: serial.isConnected,
     connectSerial: serial.connect,
     disconnectSerial: serial.disconnect,
+
+    // Audio reactive
+    audioReactive: {
+      enabled: audioReactive.enabled,
+      band: audioReactive.band,
+      sensitivity: audioReactive.sensitivity,
+      minLevel: audioReactive.minLevel,
+      currentLevel: audioReactive.currentLevel,
+      toggle: audioReactive.toggle,
+      setBand: audioReactive.setBand,
+      setSensitivity: audioReactive.setSensitivity,
+      setMinLevel: audioReactive.setMinLevel,
+    },
 
     // Control
     play,

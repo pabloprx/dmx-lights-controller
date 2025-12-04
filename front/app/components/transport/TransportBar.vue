@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import type { AudioBand } from '~/composables/useAudioReactive'
+
 const { state: linkState, connected, connect: connectLink, disconnect: disconnectLink } = useAbletonLink()
 const { isConnected: serialConnected, connect: connectSerial, audioLevels } = useUnifiedSerial()
 const {
@@ -16,9 +18,18 @@ const {
   setInternalTempo,
   stepBeat,
 } = useAppMode()
+const { audioReactive } = useSetPlayer()
 
 // Confirmation for exiting performance mode
 const showExitConfirm = ref(false)
+
+// Cycle through audio bands
+const bands: AudioBand[] = ['bass', 'mid', 'high']
+function cycleBand() {
+  const currentIndex = bands.indexOf(audioReactive.band.value)
+  const nextIndex = (currentIndex + 1) % bands.length
+  audioReactive.setBand(bands[nextIndex])
+}
 
 function handleModeToggle() {
   if (isPerformanceMode.value) {
@@ -138,6 +149,33 @@ function confirmExitPerformance() {
         :class="serialConnected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-zinc-600'"
         :title="serialConnected ? 'Serial connected' : 'Not connected'"
       />
+    </div>
+
+    <!-- Audio Reactive Toggle -->
+    <div class="flex items-center gap-1">
+      <button
+        class="px-2 py-1 rounded text-xs font-bold uppercase transition-all"
+        :class="audioReactive.enabled.value
+          ? 'bg-purple-600 text-white shadow-[0_0_8px_#9333ea]'
+          : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'"
+        title="Audio reactive mode - modulates dimmer with audio"
+        @click="audioReactive.toggle"
+      >
+        🎤
+      </button>
+      <button
+        v-if="audioReactive.enabled.value"
+        class="px-2 py-1 rounded text-[10px] font-bold uppercase transition-all"
+        :class="{
+          'bg-red-600 text-white': audioReactive.band.value === 'bass',
+          'bg-green-600 text-white': audioReactive.band.value === 'mid',
+          'bg-blue-600 text-white': audioReactive.band.value === 'high',
+        }"
+        title="Click to cycle: Bass / Mid / High"
+        @click="cycleBand"
+      >
+        {{ audioReactive.band.value.toUpperCase() }}
+      </button>
     </div>
 
     <div class="flex-1" />
