@@ -21,9 +21,9 @@ export function useSetPlayer() {
   const appMode = useAppMode()
   const audioReactive = useAudioReactive()
 
-  // Get the current beat based on mode
+  // Get the current beat based on Link connection (sync with Link when connected)
   const currentBeat = computed(() => {
-    if (appMode.isPerformanceMode.value) {
+    if (link.connected.value) {
       return Math.floor(link.state.value.beat) + 1
     } else {
       return appMode.internalBeat.value + 1
@@ -31,10 +31,25 @@ export function useSetPlayer() {
   })
 
   // Current beat within the set (1-indexed, wraps based on set length)
+  // Uses bar-aware logic when Link is connected for proper multi-bar sync
   const beatInSet = computed(() => {
     const set = store.activeSet.value
     if (!set) return 1
 
+    // When Link is connected, use bar-aware calculation
+    if (link.connected.value) {
+      const { barNumber, beatInBar, quantum } = link.state.value
+      // Calculate how many bars fit in this set
+      const barsInSet = Math.ceil(set.length / quantum)
+      // Which bar within the set are we in? (0-indexed)
+      const barInSet = barNumber % barsInSet
+      // Calculate absolute beat position: (bar * quantum) + beatInBar
+      const absoluteBeat = barInSet * quantum + beatInBar
+      // Clamp to set length (in case set isn't exactly divisible by quantum)
+      return Math.min(absoluteBeat, set.length)
+    }
+
+    // Internal tempo mode: simple modulo
     if (loopEnabled.value) {
       return ((currentBeat.value - 1) % set.length) + 1
     }

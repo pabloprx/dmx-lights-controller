@@ -10,6 +10,7 @@ export interface LinkState {
   quantum: number;
   lastBeatTime: number;
   beatInBar: number; // 1-4 for 4/4 time
+  barNumber: number; // 0, 1, 2, 3... (which bar we're in)
 }
 
 export interface LinkStore {
@@ -31,6 +32,7 @@ export const linkStore: LinkStore = {
     quantum: 4,
     lastBeatTime: 0,
     beatInBar: 1,
+    barNumber: 0,
   },
   subscribers: new Set(),
 };

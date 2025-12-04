@@ -24,6 +24,8 @@ export function startBeatLoop() {
 
     // Calculate beat in bar from beat counter (works even without transport playing)
     const beatInBar = (Math.floor(beat) % quantum) + 1;
+    // Calculate bar number (0, 1, 2, 3...) for tracking position in multi-bar sets
+    const barNumber = Math.floor(beat / quantum);
 
     updateLinkState({
       beat,
@@ -31,6 +33,7 @@ export function startBeatLoop() {
       tempo,
       isPlaying,
       beatInBar,
+      barNumber,
       lastBeatTime: isNewBeat ? Date.now() : linkStore.state.lastBeatTime,
     });
   }, 16); // ~60fps

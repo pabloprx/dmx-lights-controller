@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useDMXStore } from '~/composables/useDMXStore'
-import { getPreviewColor, createDefaultValues, getProfileById } from '~/types/dmx'
+import { getPreviewColor, createDefaultValues, getProfileById, valuesToDMX } from '~/types/dmx'
+import type { StrobeSpeed } from '~/types/dmx'
 import type { DeviceProfile } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
@@ -48,6 +49,73 @@ watch(selectedProfile, (profile) => {
 const showAddPreset = ref(false)
 const newPresetName = ref('')
 const newPresetValues = ref(createDefaultValues())
+const showDimmerSlider = ref(false)
+const showStrobeSlider = ref(false)
+
+// Quick color options for preset creator
+const quickColors = [
+  { name: 'Red', r: 255, g: 0, b: 0 },
+  { name: 'Green', r: 0, g: 255, b: 0 },
+  { name: 'Blue', r: 0, g: 0, b: 255 },
+  { name: 'Cyan', r: 0, g: 255, b: 255 },
+  { name: 'Magenta', r: 255, g: 0, b: 255 },
+  { name: 'Yellow', r: 255, g: 255, b: 0 },
+  { name: 'Orange', r: 255, g: 128, b: 0 },
+  { name: 'Pink', r: 255, g: 105, b: 180 },
+  { name: 'Purple', r: 128, g: 0, b: 255 },
+  { name: 'Lime', r: 128, g: 255, b: 0 },
+  { name: 'Teal', r: 0, g: 128, b: 128 },
+  { name: 'Coral', r: 255, g: 127, b: 80 },
+]
+
+// Dimmer quick buttons (percentage → 0-255)
+const dimmerQuickOptions = [
+  { label: 'Off', value: 0 },
+  { label: '25%', value: 64 },
+  { label: '50%', value: 127 },
+  { label: '75%', value: 191 },
+  { label: '100%', value: 255 },
+]
+
+// Strobe speed options
+const strobeSpeedOptions: { value: StrobeSpeed | null, label: string }[] = [
+  { value: null, label: 'Off' },
+  { value: 'slow', label: 'Slow' },
+  { value: 'medium', label: 'Med' },
+  { value: 'fast', label: 'Fast' },
+]
+
+function setQuickColor(color: { r: number, g: number, b: number }) {
+  newPresetValues.value.red = color.r
+  newPresetValues.value.green = color.g
+  newPresetValues.value.blue = color.b
+}
+
+function setDimmerQuick(value: number) {
+  newPresetValues.value.dimmer = value
+}
+
+function setStrobeSpeed(speed: StrobeSpeed | null) {
+  if (speed === null) {
+    newPresetValues.value.strobe = false
+  } else {
+    newPresetValues.value.strobe = true
+    newPresetValues.value.strobeSpeed = speed
+  }
+}
+
+// Live preview when editing preset
+watch(newPresetValues, () => {
+  if (showAddPreset.value && store.selectedDevice.value) {
+    const dmx = new Array(16).fill(0)
+    const channels = valuesToDMX(newPresetValues.value)
+    const start = store.selectedDevice.value.startChannel - 1
+    for (let i = 0; i < channels.length && start + i < 16; i++) {
+      dmx[start + i] = channels[i]
+    }
+    store.sendDMX(dmx)
+  }
+}, { deep: true })
 
 function handleAddPreset() {
   if (!newPresetName.value.trim()) return
@@ -64,9 +132,6 @@ function handleAddPreset() {
   newPresetValues.value = createDefaultValues()
   showAddPreset.value = false
 }
-
-// Master dimmer for quick adjustments
-const masterDimmer = ref(100)
 
 // Handle preset click - select and send DMX
 function handlePresetClick(presetId: string) {
@@ -165,19 +230,6 @@ watch(laserChannels, sendLaserChannels, { deep: true })
              RGBW COLOR PRESETS (controlType: 'rgbw')
              ═══════════════════════════════════════════════════════════ -->
         <template v-else>
-          <!-- Master Dimmer -->
-          <div class="flex items-center gap-3 px-3 py-2 bg-zinc-900/50 rounded-lg border border-zinc-800/50">
-            <label class="text-xs font-medium text-zinc-400">Master</label>
-            <input
-              v-model.number="masterDimmer"
-              type="range"
-              min="0"
-              max="100"
-              class="flex-1 h-1.5 cursor-pointer accent-green-500"
-            >
-            <span class="text-xs font-mono text-green-400 min-w-[40px] text-right">{{ masterDimmer }}%</span>
-          </div>
-
           <!-- Color Grid - GLOWING PADS -->
           <div>
             <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Colors</span>
@@ -289,12 +341,13 @@ watch(laserChannels, sendLaserChannels, { deep: true })
 
     <!-- Add Preset Dialog -->
     <Dialog :open="showAddPreset" @update:open="showAddPreset = $event">
-      <DialogContent class="sm:max-w-md">
+      <DialogContent class="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Add Custom Preset</DialogTitle>
         </DialogHeader>
 
         <div class="grid gap-4 py-4">
+          <!-- Name -->
           <div class="grid gap-2">
             <Label for="preset-name">Name</Label>
             <Input
@@ -305,9 +358,65 @@ watch(laserChannels, sendLaserChannels, { deep: true })
             />
           </div>
 
+          <!-- Colors Grid -->
           <div class="grid gap-2">
-            <Label>Dimmer</Label>
+            <Label>Colors</Label>
+            <div class="grid grid-cols-6 gap-1.5">
+              <button
+                v-for="color in quickColors"
+                :key="color.name"
+                class="quick-color-btn"
+                :class="{
+                  active: newPresetValues.red === color.r &&
+                          newPresetValues.green === color.g &&
+                          newPresetValues.blue === color.b
+                }"
+                :style="{ backgroundColor: `rgb(${color.r}, ${color.g}, ${color.b})` }"
+                :title="color.name"
+                @click="setQuickColor(color)"
+              />
+            </div>
+          </div>
+
+          <!-- White Slider (CH5) - INDEPENDENT -->
+          <div class="grid gap-2">
+            <Label>White (CH5)</Label>
             <div class="slider-row">
+              <input
+                :value="Math.round(newPresetValues.white / 2.55)"
+                type="range"
+                min="0"
+                max="100"
+                class="color-slider white"
+                @input="newPresetValues.white = Math.round(Number(($event.target as HTMLInputElement).value) * 2.55)"
+              >
+              <span class="slider-value">{{ Math.round(newPresetValues.white / 2.55) }}%</span>
+            </div>
+          </div>
+
+          <!-- Dimmer (CH1: 9-134) -->
+          <div class="grid gap-2">
+            <div class="flex items-center justify-between">
+              <Label>Dimmer (CH1)</Label>
+              <button
+                class="text-[10px] text-zinc-500 hover:text-zinc-300 px-1"
+                @click="showDimmerSlider = !showDimmerSlider"
+              >
+                {{ showDimmerSlider ? '▼ buttons' : '▶ slider' }}
+              </button>
+            </div>
+            <div v-if="!showDimmerSlider" class="quick-btn-row">
+              <button
+                v-for="opt in dimmerQuickOptions"
+                :key="opt.label"
+                class="quick-btn"
+                :class="{ active: newPresetValues.dimmer === opt.value && !newPresetValues.strobe }"
+                @click="setDimmerQuick(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+            <div v-else class="slider-row">
               <input
                 v-model.number="newPresetValues.dimmer"
                 type="range"
@@ -319,51 +428,57 @@ watch(laserChannels, sendLaserChannels, { deep: true })
             </div>
           </div>
 
-          <div class="color-sliders">
-            <div class="grid gap-1">
-              <Label>Red</Label>
+          <!-- Strobe (CH1: 135-239) -->
+          <div class="grid gap-2">
+            <div class="flex items-center justify-between">
+              <Label>Strobe (CH1)</Label>
+              <button
+                class="text-[10px] text-zinc-500 hover:text-zinc-300 px-1"
+                @click="showStrobeSlider = !showStrobeSlider"
+              >
+                {{ showStrobeSlider ? '▼ buttons' : '▶ slider' }}
+              </button>
+            </div>
+            <div v-if="!showStrobeSlider" class="quick-btn-row">
+              <button
+                v-for="opt in strobeSpeedOptions"
+                :key="opt.label"
+                class="quick-btn strobe"
+                :class="{
+                  active: opt.value === null ? !newPresetValues.strobe : (newPresetValues.strobe && newPresetValues.strobeSpeed === opt.value)
+                }"
+                @click="setStrobeSpeed(opt.value)"
+              >
+                {{ opt.label }}
+              </button>
+            </div>
+            <div v-else class="slider-row">
               <input
-                v-model.number="newPresetValues.red"
+                :value="newPresetValues.strobe ? (newPresetValues.strobeSpeed === 'slow' ? 33 : newPresetValues.strobeSpeed === 'medium' ? 66 : 100) : 0"
                 type="range"
                 min="0"
-                max="255"
-                class="color-slider red"
+                max="100"
+                class="color-slider strobe"
+                @input="(e) => {
+                  const v = Number((e.target as HTMLInputElement).value)
+                  if (v === 0) { newPresetValues.strobe = false }
+                  else {
+                    newPresetValues.strobe = true
+                    newPresetValues.strobeSpeed = v < 33 ? 'slow' : v < 66 ? 'medium' : 'fast'
+                  }
+                }"
               >
+              <span class="slider-value">{{ newPresetValues.strobe ? newPresetValues.strobeSpeed : 'Off' }}</span>
             </div>
-            <div class="grid gap-1">
-              <Label>Green</Label>
-              <input
-                v-model.number="newPresetValues.green"
-                type="range"
-                min="0"
-                max="255"
-                class="color-slider green"
-              >
-            </div>
-            <div class="grid gap-1">
-              <Label>Blue</Label>
-              <input
-                v-model.number="newPresetValues.blue"
-                type="range"
-                min="0"
-                max="255"
-                class="color-slider blue"
-              >
-            </div>
-            <div class="grid gap-1">
-              <Label>White</Label>
-              <input
-                v-model.number="newPresetValues.white"
-                type="range"
-                min="0"
-                max="255"
-                class="color-slider white"
-              >
-            </div>
+            <p class="text-[10px] text-zinc-500">
+              Strobe overrides Dimmer on CH1. Brightness = RGBW values.
+            </p>
           </div>
 
+          <!-- Preview -->
           <div class="color-preview" :style="{ backgroundColor: getPreviewColor(newPresetValues) }">
-            Preview
+            <span v-if="newPresetValues.strobe" class="animate-pulse">STROBE</span>
+            <span v-else>Preview</span>
           </div>
         </div>
 
@@ -471,5 +586,133 @@ watch(laserChannels, sendLaserChannels, { deep: true })
   color: white;
   border: 1px solid #2a2b36;
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.5);
+}
+
+/* Mode toggle (Dimmer/Strobe) */
+.mode-toggle {
+  display: flex;
+  gap: 4px;
+  background: #1a1b21;
+  padding: 4px;
+  border-radius: 8px;
+  border: 1px solid #383944;
+}
+
+.mode-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+  color: #8888a0;
+  border: none;
+}
+
+.mode-btn:hover {
+  background: #2a2b36;
+  color: #c0c0d0;
+}
+
+.mode-btn.active {
+  background: #22c55e;
+  color: #000;
+  box-shadow: 0 0 12px #22c55e40;
+}
+
+/* Strobe speed picker */
+.strobe-speed-picker {
+  display: flex;
+  gap: 4px;
+}
+
+.strobe-speed-btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #22232b;
+  color: #8888a0;
+  border: 1px solid #383944;
+}
+
+.strobe-speed-btn:hover {
+  background: #2a2b36;
+  color: #c0c0d0;
+  border-color: #484958;
+}
+
+.strobe-speed-btn.active {
+  background: #f59e0b;
+  color: #000;
+  border-color: #f59e0b;
+  box-shadow: 0 0 12px #f59e0b40;
+}
+
+/* Quick color buttons grid */
+.quick-color-btn {
+  aspect-ratio: 1;
+  border-radius: 6px;
+  border: 2px solid transparent;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3);
+}
+
+.quick-color-btn:hover {
+  transform: scale(1.1);
+  z-index: 1;
+}
+
+.quick-color-btn.active {
+  border-color: white;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.5);
+}
+
+/* Quick button row (dimmer/strobe) */
+.quick-btn-row {
+  display: flex;
+  gap: 4px;
+}
+
+.quick-btn {
+  flex: 1;
+  padding: 8px 4px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: #22232b;
+  color: #8888a0;
+  border: 1px solid #383944;
+}
+
+.quick-btn:hover {
+  background: #2a2b36;
+  color: #c0c0d0;
+  border-color: #484958;
+}
+
+.quick-btn.active {
+  background: #22c55e;
+  color: #000;
+  border-color: #22c55e;
+  box-shadow: 0 0 10px #22c55e40;
+}
+
+.quick-btn.strobe.active {
+  background: #f59e0b;
+  border-color: #f59e0b;
+  box-shadow: 0 0 10px #f59e0b40;
+}
+
+.color-slider.strobe {
+  accent-color: #f59e0b;
 }
 </style>

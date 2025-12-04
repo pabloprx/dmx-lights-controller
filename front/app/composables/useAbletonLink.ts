@@ -10,6 +10,7 @@ export interface LinkState {
   quantum: number;
   lastBeatTime: number;
   beatInBar: number;
+  barNumber: number;
 }
 
 export function useAbletonLink() {
@@ -23,6 +24,7 @@ export function useAbletonLink() {
     quantum: 4,
     lastBeatTime: 0,
     beatInBar: 1,
+    barNumber: 0,
   });
 
   const connected = ref(false);

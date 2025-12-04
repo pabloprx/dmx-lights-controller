@@ -18,7 +18,7 @@ const {
   setInternalTempo,
   stepBeat,
 } = useAppMode()
-const { audioReactive } = useSetPlayer()
+const { isPlaying, play, stop, audioReactive } = useSetPlayer()
 
 // Confirmation for exiting performance mode
 const showExitConfirm = ref(false)
@@ -29,6 +29,41 @@ function cycleBand() {
   const currentIndex = bands.indexOf(audioReactive.band.value)
   const nextIndex = (currentIndex + 1) % bands.length
   audioReactive.setBand(bands[nextIndex])
+}
+
+// Sensitivity presets
+const sensitivityPresets = [
+  { label: 'Low', value: 50 },
+  { label: 'Med', value: 100 },
+  { label: 'High', value: 175 },
+]
+
+const currentSensitivityLabel = computed(() => {
+  const preset = sensitivityPresets.find(p => p.value === audioReactive.sensitivity.value)
+  return preset?.label || 'Med'
+})
+
+function cycleSensitivity() {
+  const currentIdx = sensitivityPresets.findIndex(p => p.value === audioReactive.sensitivity.value)
+  const nextIdx = (currentIdx + 1) % sensitivityPresets.length
+  audioReactive.setSensitivity(sensitivityPresets[nextIdx].value)
+}
+
+// Unified playback toggle - controls both player and internal tempo
+function togglePlayback() {
+  if (isPlaying.value) {
+    stop()
+    // Also stop internal tempo in testing mode
+    if (isTestingMode.value && internalPlaying.value) {
+      toggleInternalPlayback()
+    }
+  } else {
+    play()
+    // Also start internal tempo in testing mode
+    if (isTestingMode.value && !internalPlaying.value) {
+      toggleInternalPlayback()
+    }
+  }
 }
 
 function handleModeToggle() {
@@ -56,10 +91,11 @@ function confirmExitPerformance() {
       <template v-if="isTestingMode">
         <button
           class="w-8 h-8 flex items-center justify-center rounded text-base cursor-pointer transition-colors"
-          :class="internalPlaying ? 'bg-green-500 text-black hover:bg-green-400' : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'"
-          @click="toggleInternalPlayback"
+          :class="isPlaying ? 'bg-green-500 text-black hover:bg-green-400' : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'"
+          @click="togglePlayback"
+          title="Play/Stop set playback"
         >
-          {{ internalPlaying ? '⏸' : '▶' }}
+          {{ isPlaying ? '⏸' : '▶' }}
         </button>
         <button
           class="w-8 h-8 flex items-center justify-center rounded text-sm bg-neutral-800 text-neutral-400 hover:bg-neutral-700 cursor-pointer"
@@ -92,19 +128,46 @@ function confirmExitPerformance() {
       </template>
     </div>
 
-    <!-- Beat Indicator -->
-    <div class="flex items-center gap-2">
+    <!-- Beat Indicator (syncs with Link when connected, otherwise internal) -->
+    <div class="beat-indicator group relative">
+      <div class="flex items-center gap-2">
+        <div
+          v-for="i in 4"
+          :key="i"
+          class="w-8 h-8 flex items-center justify-center rounded text-sm font-bold transition-colors"
+          :class="
+            connected
+              ? (linkState.beatInBar === i ? 'bg-red-600 text-white shadow-[0_0_12px_#dc2626]' : 'bg-neutral-800 text-neutral-600')
+              : ((internalBeat % 4) + 1 === i ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-600')
+          "
+        >
+          {{ i }}
+        </div>
+      </div>
+      <!-- Link Debug Tooltip (on hover when connected) -->
       <div
-        v-for="i in 4"
-        :key="i"
-        class="w-8 h-8 flex items-center justify-center rounded text-sm font-bold"
-        :class="
-          isPerformanceMode
-            ? (linkState.beatInBar === i ? 'bg-red-600 text-white' : 'bg-neutral-800 text-neutral-600')
-            : ((internalBeat % 4) + 1 === i ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-600')
-        "
+        v-if="connected"
+        class="link-debug-tooltip"
       >
-        {{ i }}
+        <div class="text-[10px] font-bold text-green-400 mb-1">LINK DEBUG</div>
+        <div class="grid grid-cols-2 gap-x-3 gap-y-0.5 text-[9px] font-mono">
+          <span class="text-zinc-500">tempo:</span>
+          <span class="text-white">{{ linkState.tempo.toFixed(2) }}</span>
+          <span class="text-zinc-500">beat:</span>
+          <span class="text-white">{{ linkState.beat.toFixed(2) }}</span>
+          <span class="text-zinc-500">beatInBar:</span>
+          <span class="text-white">{{ linkState.beatInBar }}</span>
+          <span class="text-zinc-500">barNumber:</span>
+          <span class="text-amber-400">{{ linkState.barNumber }}</span>
+          <span class="text-zinc-500">phase:</span>
+          <span class="text-white">{{ linkState.phase.toFixed(3) }}</span>
+          <span class="text-zinc-500">quantum:</span>
+          <span class="text-white">{{ linkState.quantum }}</span>
+          <span class="text-zinc-500">peers:</span>
+          <span class="text-white">{{ linkState.numPeers }}</span>
+          <span class="text-zinc-500">playing:</span>
+          <span :class="linkState.isPlaying ? 'text-green-400' : 'text-red-400'">{{ linkState.isPlaying }}</span>
+        </div>
       </div>
     </div>
 
@@ -175,6 +238,14 @@ function confirmExitPerformance() {
         @click="cycleBand"
       >
         {{ audioReactive.band.value.toUpperCase() }}
+      </button>
+      <button
+        v-if="audioReactive.enabled.value"
+        class="px-2 py-1 rounded text-[10px] font-bold uppercase transition-all bg-amber-600 text-white hover:bg-amber-500"
+        :title="`Sensitivity: ${currentSensitivityLabel} - Click to cycle`"
+        @click="cycleSensitivity"
+      >
+        {{ currentSensitivityLabel }}
       </button>
     </div>
 
@@ -333,5 +404,32 @@ function confirmExitPerformance() {
 
 .audio-glow-blue {
   box-shadow: 0 0 8px #3b82f6, 0 0 12px #3b82f680;
+}
+
+/* Link debug tooltip */
+.beat-indicator {
+  position: relative;
+}
+
+.link-debug-tooltip {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-top: 8px;
+  padding: 8px 12px;
+  background: #1a1b21;
+  border: 1px solid #383944;
+  border-radius: 6px;
+  z-index: 50;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  white-space: nowrap;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.beat-indicator:hover .link-debug-tooltip {
+  opacity: 1;
 }
 </style>

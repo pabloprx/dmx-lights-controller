@@ -125,6 +125,60 @@ function handleDeleteDevice() {
   showEditDevice.value = false
   editingDeviceId.value = null
 }
+
+// Edit group dialog
+const showEditGroup = ref(false)
+const editingGroupId = ref<string | null>(null)
+const editGroupName = ref('')
+const editGroupDevices = ref<string[]>([])
+
+// Get the profile of the group being edited (for device filtering)
+const editingGroupProfile = computed(() => {
+  if (!editingGroupId.value) return null
+  const group = store.groups.value.find(g => g.id === editingGroupId.value)
+  return group?.profileId || null
+})
+
+function openEditGroup(group: { id: string, name: string, deviceIds: string[] }) {
+  editingGroupId.value = group.id
+  editGroupName.value = group.name
+  editGroupDevices.value = [...group.deviceIds]
+  showEditGroup.value = true
+}
+
+function toggleDeviceForEditGroup(deviceId: string) {
+  const idx = editGroupDevices.value.indexOf(deviceId)
+  if (idx === -1) {
+    editGroupDevices.value.push(deviceId)
+  } else {
+    editGroupDevices.value.splice(idx, 1)
+  }
+}
+
+function isDeviceCompatibleForEditGroup(deviceId: string): boolean {
+  if (!editingGroupProfile.value) return true
+  const device = store.devices.value.find(d => d.id === deviceId)
+  return device?.profileId === editingGroupProfile.value
+}
+
+function handleEditGroup() {
+  if (!editingGroupId.value || !editGroupName.value.trim() || editGroupDevices.value.length === 0) return
+
+  store.updateGroup(editingGroupId.value, {
+    name: editGroupName.value.trim(),
+    deviceIds: [...editGroupDevices.value],
+  })
+
+  showEditGroup.value = false
+  editingGroupId.value = null
+}
+
+function handleDeleteGroup() {
+  if (!editingGroupId.value) return
+  store.deleteGroup(editingGroupId.value)
+  showEditGroup.value = false
+  editingGroupId.value = null
+}
 </script>
 
 <template>
@@ -254,6 +308,14 @@ function handleDeleteDevice() {
             {{ group.name }}
           </span>
           <span class="ml-auto text-xs font-mono text-zinc-600">{{ group.deviceIds.length }}</span>
+          <!-- Edit button -->
+          <button
+            class="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-green-400 transition-all"
+            title="Edit group"
+            @click.stop="openEditGroup(group)"
+          >
+            ✎
+          </button>
         </div>
 
         <div v-if="store.groups.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
@@ -470,6 +532,66 @@ function handleDeleteDevice() {
           <div class="flex gap-2">
             <Button variant="outline" @click="showEditDevice = false">Cancel</Button>
             <Button @click="handleEditDevice">Save</Button>
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Edit Group Dialog -->
+    <Dialog :open="showEditGroup" @update:open="showEditGroup = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Group</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="edit-group-name">Name</Label>
+            <Input
+              id="edit-group-name"
+              v-model="editGroupName"
+              placeholder="e.g. Left Lights"
+              @keyup.enter="handleEditGroup"
+            />
+          </div>
+
+          <div class="grid gap-2">
+            <Label>
+              Devices
+              <span v-if="editingGroupProfile" class="text-zinc-500 font-normal">({{ getProfileLabel(editingGroupProfile) }} only)</span>
+            </Label>
+            <div class="device-picker">
+              <div
+                v-for="device in store.devices.value"
+                :key="device.id"
+                class="device-option"
+                :class="{ incompatible: !isDeviceCompatibleForEditGroup(device.id) }"
+                @click="isDeviceCompatibleForEditGroup(device.id) && toggleDeviceForEditGroup(device.id)"
+              >
+                <Checkbox
+                  :checked="editGroupDevices.includes(device.id)"
+                  :disabled="!isDeviceCompatibleForEditGroup(device.id)"
+                  @update:checked="isDeviceCompatibleForEditGroup(device.id) && toggleDeviceForEditGroup(device.id)"
+                />
+                <span
+                  class="ml-2 px-1.5 py-0.5 text-[9px] font-bold rounded"
+                  :class="device.profileId === 'laser-10ch'
+                    ? 'bg-purple-500/20 text-purple-400'
+                    : 'bg-cyan-500/20 text-cyan-400'"
+                >
+                  {{ getProfileLabel(device.profileId) }}
+                </span>
+                <span class="ml-1">{{ device.name }}</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <DialogFooter class="flex justify-between">
+          <Button variant="destructive" @click="handleDeleteGroup">Delete</Button>
+          <div class="flex gap-2">
+            <Button variant="outline" @click="showEditGroup = false">Cancel</Button>
+            <Button :disabled="editGroupDevices.length === 0" @click="handleEditGroup">Save</Button>
           </div>
         </DialogFooter>
       </DialogContent>
