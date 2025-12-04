@@ -22,11 +22,15 @@ export function startBeatLoop() {
     const isNewBeat = currentBeatInt !== lastBeatInt;
     lastBeatInt = currentBeatInt;
 
+    // Calculate beat in bar from beat counter (works even without transport playing)
+    const beatInBar = (Math.floor(beat) % quantum) + 1;
+
     updateLinkState({
       beat,
       phase,
       tempo,
       isPlaying,
+      beatInBar,
       lastBeatTime: isNewBeat ? Date.now() : linkStore.state.lastBeatTime,
     });
   }, 16); // ~60fps

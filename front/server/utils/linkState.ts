@@ -38,10 +38,8 @@ export const linkStore: LinkStore = {
 export function updateLinkState(partial: Partial<LinkState>) {
   Object.assign(linkStore.state, partial);
 
-  // Calculate beat in bar (1-4 for 4/4 time)
-  if (partial.phase !== undefined) {
-    linkStore.state.beatInBar = Math.floor(partial.phase) + 1;
-  }
+  // beatInBar is now calculated directly in beatLoop.ts from the beat counter
+  // This works even when Link transport isn't playing
 
   // Notify subscribers
   for (const callback of linkStore.subscribers) {

@@ -89,8 +89,8 @@ function confirmExitPerformance() {
         class="w-8 h-8 flex items-center justify-center rounded text-sm font-bold"
         :class="
           isPerformanceMode
-            ? (linkState.isPlaying && linkState.beatInBar === i ? 'bg-red-600 text-white' : 'bg-neutral-800 text-neutral-600')
-            : ((internalPlaying || true) && (internalBeat % 4) + 1 === i ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-600')
+            ? (linkState.beatInBar === i ? 'bg-red-600 text-white' : 'bg-neutral-800 text-neutral-600')
+            : ((internalBeat % 4) + 1 === i ? 'bg-amber-500 text-black' : 'bg-neutral-800 text-neutral-600')
         "
       >
         {{ i }}
