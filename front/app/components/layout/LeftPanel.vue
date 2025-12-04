@@ -93,6 +93,38 @@ function isDeviceCompatibleForGroup(deviceId: string): boolean {
   const device = store.devices.value.find(d => d.id === deviceId)
   return device?.profileId === groupProfileId.value
 }
+
+// Edit device dialog
+const showEditDevice = ref(false)
+const editingDeviceId = ref<string | null>(null)
+const editDeviceName = ref('')
+const editDeviceChannel = ref(1)
+
+function openEditDevice(device: { id: string, name: string, startChannel: number }) {
+  editingDeviceId.value = device.id
+  editDeviceName.value = device.name
+  editDeviceChannel.value = device.startChannel
+  showEditDevice.value = true
+}
+
+function handleEditDevice() {
+  if (!editingDeviceId.value || !editDeviceName.value.trim()) return
+
+  store.updateDevice(editingDeviceId.value, {
+    name: editDeviceName.value.trim(),
+    startChannel: editDeviceChannel.value,
+  })
+
+  showEditDevice.value = false
+  editingDeviceId.value = null
+}
+
+function handleDeleteDevice() {
+  if (!editingDeviceId.value) return
+  store.deleteDevice(editingDeviceId.value)
+  showEditDevice.value = false
+  editingDeviceId.value = null
+}
 </script>
 
 <template>
@@ -147,6 +179,14 @@ function isDeviceCompatibleForGroup(deviceId: string): boolean {
             {{ device.name }}
           </span>
           <span class="ml-auto text-[10px] font-mono text-zinc-500 shrink-0">CH{{ device.startChannel }}</span>
+          <!-- Edit button -->
+          <button
+            class="opacity-0 group-hover:opacity-100 p-1 text-zinc-500 hover:text-green-400 transition-all"
+            title="Edit device"
+            @click.stop="openEditDevice(device)"
+          >
+            ✎
+          </button>
         </div>
 
         <div v-if="store.devices.value.length === 0" class="py-6 text-center text-zinc-400 text-xs">
@@ -391,6 +431,46 @@ function isDeviceCompatibleForGroup(deviceId: string): boolean {
           <Button :disabled="selectedDevicesForGroup.length === 0" @click="handleAddGroup">
             Add
           </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+
+    <!-- Edit Device Dialog -->
+    <Dialog :open="showEditDevice" @update:open="showEditDevice = $event">
+      <DialogContent class="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit Device</DialogTitle>
+        </DialogHeader>
+
+        <div class="grid gap-4 py-4">
+          <div class="grid gap-2">
+            <Label for="edit-device-name">Name</Label>
+            <Input
+              id="edit-device-name"
+              v-model="editDeviceName"
+              placeholder="e.g. Pinspot 1"
+              @keyup.enter="handleEditDevice"
+            />
+          </div>
+
+          <div class="grid gap-2">
+            <Label for="edit-device-channel">Start Channel (1-512)</Label>
+            <Input
+              id="edit-device-channel"
+              v-model.number="editDeviceChannel"
+              type="number"
+              min="1"
+              max="512"
+            />
+          </div>
+        </div>
+
+        <DialogFooter class="flex justify-between">
+          <Button variant="destructive" @click="handleDeleteDevice">Delete</Button>
+          <div class="flex gap-2">
+            <Button variant="outline" @click="showEditDevice = false">Cancel</Button>
+            <Button @click="handleEditDevice">Save</Button>
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>
