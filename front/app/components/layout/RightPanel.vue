@@ -67,6 +67,33 @@ function handleAddPreset() {
 
 // Master dimmer for quick adjustments
 const masterDimmer = ref(100)
+
+// Handle preset click - select and send DMX
+function handlePresetClick(presetId: string) {
+  store.selectPreset(presetId)
+
+  // Send DMX to selected device
+  if (store.selectedDevice.value) {
+    store.applyPresetToDevice(presetId, store.selectedDevice.value.id)
+  }
+}
+
+// Send laser channel values to DMX
+function sendLaserChannels() {
+  if (!store.selectedDevice.value) return
+
+  const dmx = new Array(16).fill(0)
+  const start = store.selectedDevice.value.startChannel - 1
+
+  for (let i = 0; i < laserChannels.value.length && start + i < 16; i++) {
+    dmx[start + i] = laserChannels.value[i]
+  }
+
+  store.sendDMX(dmx)
+}
+
+// Watch laser channel changes and send DMX
+watch(laserChannels, sendLaserChannels, { deep: true })
 </script>
 
 <template>
@@ -170,7 +197,7 @@ const masterDimmer = ref(100)
                     : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
                 }"
                 :title="preset.name"
-                @click="store.selectPreset(preset.id)"
+                @click="handlePresetClick(preset.id)"
               >
                 <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
                   {{ preset.name }}
@@ -191,7 +218,7 @@ const masterDimmer = ref(100)
                 :class="store.selectedPresetId.value === preset.id
                   ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
                   : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-                @click="store.selectPreset(preset.id)"
+                @click="handlePresetClick(preset.id)"
               >
                 {{ preset.name.replace('Strobe ', '') }}
               </button>
@@ -210,7 +237,7 @@ const masterDimmer = ref(100)
                 :class="store.selectedPresetId.value === preset.id
                   ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
                   : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-                @click="store.selectPreset(preset.id)"
+                @click="handlePresetClick(preset.id)"
               >
                 {{ preset.name }}
               </button>
@@ -236,7 +263,7 @@ const masterDimmer = ref(100)
                     : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
                 }"
                 :title="preset.name"
-                @click="store.selectPreset(preset.id)"
+                @click="handlePresetClick(preset.id)"
               >
                 <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
                   {{ preset.name }}

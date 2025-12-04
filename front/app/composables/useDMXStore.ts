@@ -502,6 +502,37 @@ export function useDMXStore() {
   }
 
   // ═══════════════════════════════════════════════════════════════
+  // DMX OUTPUT
+  // ═══════════════════════════════════════════════════════════════
+  const { sendDMX, isConnected: serialConnected } = useUnifiedSerial()
+
+  // Apply preset to selected device and send DMX (for testing mode)
+  function applyPresetToDevice(presetId: string, deviceId: string) {
+    const preset = getPreset(presetId)
+    const device = getDevice(deviceId)
+    if (!preset || !device) return
+
+    // Build DMX array
+    const dmx = new Array(16).fill(0)
+    const channels = valuesToDMX(preset.values)
+    const start = device.startChannel - 1
+
+    for (let i = 0; i < channels.length && start + i < 16; i++) {
+      dmx[start + i] = channels[i]
+    }
+
+    // Send to serial
+    sendDMX(dmx)
+    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, dmx)
+  }
+
+  // Send blackout (all zeros)
+  function sendBlackout() {
+    sendDMX(new Array(16).fill(0))
+    console.log('[DMX] Blackout sent')
+  }
+
+  // ═══════════════════════════════════════════════════════════════
   // DMX HELPERS
   // ═══════════════════════════════════════════════════════════════
   function getProfile(profileId: string): DeviceProfile | null {
@@ -671,6 +702,12 @@ export function useDMXStore() {
     getTargetDevices,
     getSetDMX,
     getOverlappingDevices,
+
+    // DMX output
+    serialConnected,
+    applyPresetToDevice,
+    sendBlackout,
+    sendDMX,
 
     // Storage
     loadFromStorage,

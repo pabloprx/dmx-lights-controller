@@ -1,19 +1,9 @@
-// Unified Serial - handles both audio input (JSON) and DMX output (CSV)
-// Works with dmx_controller.ino on ESP32
+// DMX Serial - handles DMX output to ESP32
+// Works with dmx_controller.ino (output-only mode)
 
-export interface AudioLevels {
-  bass: number
-  mid: number
-  high: number
-}
-
-const audioLevels = ref<AudioLevels>({ bass: 0, mid: 0, high: 0 })
 const isConnected = ref(false)
 const port = ref<SerialPort | null>(null)
 const writer = ref<WritableStreamDefaultWriter<Uint8Array> | null>(null)
-const reader = ref<ReadableStreamDefaultReader<string> | null>(null)
-
-let buffer = ''
 
 export function useUnifiedSerial() {
   async function connect() {
@@ -31,9 +21,7 @@ export function useUnifiedSerial() {
       writer.value = selectedPort.writable?.getWriter() || null
 
       isConnected.value = true
-
-      // Start read loop for audio input
-      readLoop()
+      console.log('DMX Serial connected')
 
       return true
     } catch (error) {
@@ -43,13 +31,6 @@ export function useUnifiedSerial() {
   }
 
   async function disconnect() {
-    if (reader.value) {
-      try {
-        await reader.value.cancel()
-      } catch {}
-      reader.value = null
-    }
-
     if (writer.value) {
       try {
         writer.value.releaseLock()
@@ -65,57 +46,7 @@ export function useUnifiedSerial() {
     }
 
     isConnected.value = false
-    audioLevels.value = { bass: 0, mid: 0, high: 0 }
-  }
-
-  async function readLoop() {
-    if (!port.value?.readable) return
-
-    const textDecoder = new TextDecoderStream()
-    const readableStreamClosed = port.value.readable.pipeTo(textDecoder.writable)
-    reader.value = textDecoder.readable.getReader()
-
-    try {
-      while (true) {
-        const { value, done } = await reader.value.read()
-        if (done) break
-
-        buffer += value
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          parseLine(line.trim())
-        }
-      }
-    } catch (error) {
-      // Connection closed or error
-      console.error('Serial read error:', error)
-    } finally {
-      reader.value?.releaseLock()
-      await readableStreamClosed.catch(() => {})
-    }
-  }
-
-  function parseLine(line: string) {
-    if (!line.startsWith('{')) return
-
-    try {
-      const data = JSON.parse(line)
-      if (
-        typeof data.bass === 'number' &&
-        typeof data.mid === 'number' &&
-        typeof data.high === 'number'
-      ) {
-        audioLevels.value = {
-          bass: data.bass,
-          mid: data.mid,
-          high: data.high,
-        }
-      }
-    } catch {
-      // Invalid JSON, ignore
-    }
+    console.log('DMX Serial disconnected')
   }
 
   // Send DMX values as CSV: "255,128,0,0,255,0,0,0,0,0,0,0,0,0,0,0\n"
@@ -137,7 +68,6 @@ export function useUnifiedSerial() {
   }
 
   return {
-    audioLevels: readonly(audioLevels),
     isConnected: readonly(isConnected),
     connect,
     disconnect,
