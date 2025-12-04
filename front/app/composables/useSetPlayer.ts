@@ -137,6 +137,7 @@ export function useSetPlayer() {
   // Control functions
   function play() {
     isPlaying.value = true
+    lastDMXSent = [] // Reset to force fresh send
     updateDMX()
   }
 
@@ -146,9 +147,16 @@ export function useSetPlayer() {
   }
 
   function setActiveSet(setId: string | null) {
+    const previousId = store.activeSetId.value
     store.setActiveSet(setId)
-    if (isPlaying.value && setId) {
-      updateDMX()
+
+    // Force update if set changed (even if not playing yet - play() will be called next)
+    if (setId && setId !== previousId) {
+      // Reset lastDMXSent to force a fresh send
+      lastDMXSent = []
+      if (isPlaying.value) {
+        updateDMX()
+      }
     }
   }
 

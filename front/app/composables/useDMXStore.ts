@@ -349,10 +349,16 @@ export function useDMXStore() {
       duration: sceneClip.duration,
     }))
 
-    // Replace set tracks and clips
-    set.tracks = newTracks
-    set.clips = newClips
+    // Replace set tracks and clips (use splice to ensure reactivity)
+    set.tracks.splice(0, set.tracks.length, ...newTracks)
+    set.clips.splice(0, set.clips.length, ...newClips)
     set.length = scene.length
+
+    // Force reactivity by triggering the sets array
+    const idx = sets.value.findIndex(s => s.id === setId)
+    if (idx !== -1) {
+      sets.value.splice(idx, 1, { ...set })
+    }
 
     return true
   }
