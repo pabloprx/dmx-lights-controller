@@ -53,6 +53,4 @@ void loop() {
   if (highLevel < 15) highLevel = 0;
 
   Serial.printf("{\"bass\":%d,\"mid\":%d,\"high\":%d}\n", bassLevel, midLevel, highLevel);
-
-  delay(0);
 }

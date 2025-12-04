@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const { state: linkState, connected, connect: connectLink, disconnect: disconnectLink } = useAbletonLink()
-const { isConnected: serialConnected, connect: connectSerial } = useUnifiedSerial()
+const { isConnected: serialConnected, connect: connectSerial, audioLevels } = useUnifiedSerial()
 const {
   mode,
   isTestingMode,
@@ -97,10 +97,47 @@ function confirmExitPerformance() {
       </div>
     </div>
 
-    <!-- DMX Status Indicator -->
-    <div v-if="serialConnected" class="dmx-status">
-      <div class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_#22c55e]" />
-      <span class="text-[10px] text-green-400 font-mono">DMX</span>
+    <!-- Audio Levels - Always visible -->
+    <div class="audio-levels">
+      <!-- Bass -->
+      <div class="audio-bar">
+        <span class="audio-label text-red-400">B</span>
+        <div class="audio-track">
+          <div
+            class="audio-fill bg-red-500"
+            :class="{ 'audio-glow-red': audioLevels.bass > 70 }"
+            :style="{ width: `${audioLevels.bass}%` }"
+          />
+        </div>
+      </div>
+      <!-- Mid -->
+      <div class="audio-bar">
+        <span class="audio-label text-green-400">M</span>
+        <div class="audio-track">
+          <div
+            class="audio-fill bg-green-500"
+            :class="{ 'audio-glow-green': audioLevels.mid > 70 }"
+            :style="{ width: `${audioLevels.mid}%` }"
+          />
+        </div>
+      </div>
+      <!-- High -->
+      <div class="audio-bar">
+        <span class="audio-label text-blue-400">H</span>
+        <div class="audio-track">
+          <div
+            class="audio-fill bg-blue-500"
+            :class="{ 'audio-glow-blue': audioLevels.high > 70 }"
+            :style="{ width: `${audioLevels.high}%` }"
+          />
+        </div>
+      </div>
+      <!-- Connection indicator -->
+      <div
+        class="w-1.5 h-1.5 rounded-full ml-1"
+        :class="serialConnected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-zinc-600'"
+        :title="serialConnected ? 'Serial connected' : 'Not connected'"
+      />
     </div>
 
     <div class="flex-1" />
@@ -208,14 +245,55 @@ function confirmExitPerformance() {
 </template>
 
 <style scoped>
-/* DMX Status Indicator */
-.dmx-status {
+/* Audio Levels - Neon Studio Style */
+.audio-levels {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 4px 10px;
+  gap: 8px;
+  padding: 6px 12px;
   background: #22232b;
-  border: 1px solid #22c55e40;
+  border: 1px solid #383944;
   border-radius: 6px;
+}
+
+.audio-bar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.audio-label {
+  font-size: 10px;
+  font-weight: 600;
+  width: 12px;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.audio-track {
+  width: 48px;
+  height: 8px;
+  background: #1a1b21;
+  border-radius: 4px;
+  overflow: hidden;
+  border: 1px solid #383944;
+}
+
+.audio-fill {
+  height: 100%;
+  transition: width 50ms ease-out;
+  border-radius: 3px;
+}
+
+/* Glow effects when level > 70% */
+.audio-glow-red {
+  box-shadow: 0 0 8px #ef4444, 0 0 12px #ef444480;
+}
+
+.audio-glow-green {
+  box-shadow: 0 0 8px #22c55e, 0 0 12px #22c55e80;
+}
+
+.audio-glow-blue {
+  box-shadow: 0 0 8px #3b82f6, 0 0 12px #3b82f680;
 }
 </style>
