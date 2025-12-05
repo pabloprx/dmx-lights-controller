@@ -69,6 +69,21 @@ export interface PresetValues {
 // PRESET (profile-linked, shared across devices of same type)
 // ═══════════════════════════════════════════════════════════════
 export type PresetCategory = 'color' | 'strobe' | 'dimmer' | 'custom'
+export type AudioBand = 'bass' | 'mid' | 'high'
+
+// Easing curve types for audio reactive
+export type AudioCurve = 'square' | 'linear' | 'sine'
+
+// Audio reactive settings for a preset
+export interface PresetAudioReactive {
+  enabled: boolean
+  band: AudioBand                 // Which frequency band to follow
+  channel: number                 // Channel offset to modulate (0=dimmer, 1=R, etc.)
+  threshold: number               // Min audio level to start reacting (0-100%)
+  min: number                     // Output intensity min (0-100%)
+  max: number                     // Output intensity max (0-100%)
+  curve: AudioCurve               // Response curve shape
+}
 
 export interface Preset {
   id: string
@@ -78,6 +93,7 @@ export interface Preset {
   channelValues?: number[]        // For non-RGBW profiles (Laser, etc.)
   isBuiltIn: boolean              // System presets vs user-created
   category: PresetCategory
+  audioReactive?: PresetAudioReactive  // Optional audio-reactive modulation
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -237,21 +253,21 @@ export const BUILT_IN_PRESETS: Preset[] = [
 
   // Strobes
   { id: 'builtin-strobe-slow', name: 'Strobe Slow', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
-    values: { dimmer: 255, strobe: true, strobeSpeed: 'slow', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'slow', red: 255, green: 255, blue: 255, white: 0 } },
   { id: 'builtin-strobe-med', name: 'Strobe Med', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
-    values: { dimmer: 255, strobe: true, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 0 } },
   { id: 'builtin-strobe-fast', name: 'Strobe Fast', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'strobe',
-    values: { dimmer: 255, strobe: true, strobeSpeed: 'fast', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 255, strobe: true, strobeSpeed: 'fast', red: 255, green: 255, blue: 255, white: 0 } },
 
-  // Dimmers
+  // Dimmers - only set dimmer channel, colors stay at 0 (don't override current color)
   { id: 'builtin-dim-25', name: '25%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
-    values: { dimmer: 64, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 64, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 0, white: 0 } },
   { id: 'builtin-dim-50', name: '50%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
-    values: { dimmer: 128, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 128, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 0, white: 0 } },
   { id: 'builtin-dim-75', name: '75%', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
-    values: { dimmer: 192, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 192, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 0, white: 0 } },
   { id: 'builtin-full', name: 'Full', profileId: 'pinspot-rgbw-5ch', isBuiltIn: true, category: 'dimmer',
-    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 255, green: 255, blue: 255, white: 255 } },
+    values: { dimmer: 255, strobe: false, strobeSpeed: 'medium', red: 0, green: 0, blue: 0, white: 0 } },
 ]
 
 // ═══════════════════════════════════════════════════════════════
@@ -285,6 +301,18 @@ export function createDefaultValues(): PresetValues {
     green: 0,
     blue: 0,
     white: 0,
+  }
+}
+
+export function createDefaultAudioReactive(): PresetAudioReactive {
+  return {
+    enabled: false,
+    band: 'bass',
+    channel: 0,        // Dimmer channel
+    threshold: 0,      // No threshold (react to any level)
+    min: 0,            // Output from 0%
+    max: 100,          // Output to 100%
+    curve: 'linear',   // Linear response
   }
 }
 

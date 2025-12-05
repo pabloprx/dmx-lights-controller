@@ -20,6 +20,9 @@ const loopEnabled = ref(true)
 const masterDimmer = ref(100) // 0-100%
 const dimmerChannels = ref<DimmerChannelConfig[]>([])
 
+// Export master dimmer for use by other composables (e.g., useDMXStore for preview)
+export { masterDimmer }
+
 // Load dimmer config from localStorage
 const DIMMER_CONFIG_KEY = 'dmx-dimmer-config'
 function loadDimmerConfig() {
@@ -128,21 +131,59 @@ export function useSetPlayer() {
   })
 
   // Watch audio levels for audio-reactive mode (continuous updates)
+  // Use a dedicated fast path that only updates audio-reactive channels
   watch(
     () => serial.audioLevels.value,
     () => {
-      if (!audioReactive.enabled.value) return
       if (!isPlaying.value) return
       if (appMode.blackout.value) return
-      updateDMX()
+
+      // Fast path: only update if we have audio-reactive presets or global mode
+      const set = store.activeSet.value
+      if (!set) return
+
+      const hasPresetAudio = store.getActiveAudioReactiveSettings(set, beatInSet.value).length > 0
+      if (!hasPresetAudio && !audioReactive.enabled.value) return
+
+      // Use fast audio update (skip full DMX recalc)
+      updateAudioReactiveOnly()
     },
     { deep: true }
   )
 
+  // Fast path: only update audio-reactive channels without full recalc
+  function updateAudioReactiveOnly() {
+    const set = store.activeSet.value
+    if (!set) return
+
+    const beat = beatInSet.value
+
+    // Start with last sent values (avoid full recalc)
+    let channels = lastDMXSent.length > 0 ? [...lastDMXSent] : store.getSetDMX(set, beat).slice(0, 100)
+
+    // Apply preset audio modulation
+    channels = audioReactive.applyPresetAudioModulation(channels, set, beat)
+
+    // Apply global audio modulation if enabled
+    if (audioReactive.enabled.value) {
+      channels = audioReactive.applyAudioModulation(channels)
+    }
+
+    // Apply master dimmer
+    if (masterDimmer.value < 100) {
+      channels = applyMasterDimmer(channels, masterDimmer.value)
+    }
+
+    // Skip if unchanged
+    if (arraysEqual(channels, lastDMXSent)) return
+
+    lastDMXSent = [...channels]
+    serial.sendDMX(channels)
+  }
+
   function updateDMX() {
     const set = store.activeSet.value
     if (!set) {
-      console.log('[SetPlayer] No active set, sending blackout')
       sendBlackout()
       return
     }
@@ -151,24 +192,20 @@ export function useSetPlayer() {
     const beat = beatInSet.value
     const dmxValues = store.getSetDMX(set, beat)
 
-    console.log('[SetPlayer] updateDMX - beat:', beat, 'set:', set.name, 'clips:', set.clips.length)
-
     // Use all 100 channels
     let channels = dmxValues.slice(0, 100)
 
-    // Debug: show non-zero channels
-    const nonZero = channels.map((v, i) => v > 0 ? `ch${i+1}=${v}` : null).filter(Boolean)
-    if (nonZero.length > 0) {
-      console.log('[SetPlayer] Non-zero channels:', nonZero.join(', '))
-    }
+    // Apply audio modulation
+    // 1. Preset-based audio reactive (per-preset settings)
+    channels = audioReactive.applyPresetAudioModulation(channels, set, beat)
 
-    // Apply audio modulation if enabled
+    // 2. Legacy global audio modulation (if enabled)
     if (audioReactive.enabled.value) {
       channels = audioReactive.applyAudioModulation(channels)
     }
 
-    // Apply master dimmer to configured channels
-    if (masterDimmer.value < 100 && dimmerChannels.value.length > 0) {
+    // Apply master dimmer to all devices
+    if (masterDimmer.value < 100) {
       channels = applyMasterDimmer(channels, masterDimmer.value)
     }
 
@@ -197,20 +234,35 @@ export function useSetPlayer() {
     return true
   }
 
-  // Apply master dimmer to configured channels only
+  // Apply master dimmer to ALL devices' channel 0 (dimmer channel)
   function applyMasterDimmer(channels: number[], dimmerPercent: number): number[] {
     const result = [...channels]
     const scale = dimmerPercent / 100
 
-    for (const config of dimmerChannels.value) {
-      const idx = config.channel - 1 // Convert to 0-indexed
+    // Auto-apply to all devices' dimmer channel (offset 0)
+    const devices = store.devices.value
+    for (const device of devices) {
+      const idx = device.startChannel - 1 // Convert to 0-indexed
       if (idx >= 0 && idx < result.length) {
-        // Map the current value proportionally within the min-max range
-        // At 100% dimmer: value stays at max (or current)
-        // At 0% dimmer: value goes to min
+        const baseDimmer = result[idx]
+        // Only scale if it's in dimmer range (9-134 for pinspot)
+        if (baseDimmer >= 9 && baseDimmer <= 134) {
+          const intensity = (baseDimmer - 9) / 125 // 0-1
+          result[idx] = Math.round(9 + intensity * scale * 125)
+        } else if (baseDimmer >= 240) {
+          // Full mode: convert to scaled dimmer
+          result[idx] = Math.round(9 + scale * 125)
+        }
+        // Don't touch strobe mode (135-239)
+      }
+    }
+
+    // Also apply any manually configured channels (for non-device channels)
+    for (const config of dimmerChannels.value) {
+      const idx = config.channel - 1
+      if (idx >= 0 && idx < result.length) {
         const range = config.max - config.min
         const dimmedValue = Math.round(config.min + range * scale)
-        // Only apply if it would reduce the value (dimmer = reduce brightness)
         result[idx] = Math.min(result[idx], dimmedValue)
       }
     }
@@ -224,6 +276,9 @@ export function useSetPlayer() {
     if (isPlaying.value && !appMode.blackout.value) {
       lastDMXSent = [] // Force update
       updateDMX()
+    } else if (!isPlaying.value) {
+      // Testing mode: refresh DMX output with new dimmer value
+      store.refreshDMXWithDimmer()
     }
   }
 

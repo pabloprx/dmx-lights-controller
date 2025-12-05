@@ -7,6 +7,7 @@ import {
   DEVICE_PROFILES, BUILT_IN_PRESETS, TRACK_COLORS,
   generateId, createDefaultSet, createDefaultTrack, valuesToDMX, getProfileById, presetToChannels
 } from '~/types/dmx'
+import { masterDimmer } from './useSetPlayer'
 
 const STORAGE_KEY = 'dmx-store-v3'
 
@@ -28,6 +29,10 @@ const selectedPresetId = ref<string | null>(null)
 const selectedSceneId = ref<string | null>(null)
 const selectedSetId = ref<string | null>(null)
 const activeSetId = ref<string | null>(null) // Set currently playing
+
+// Current DMX state tracking (for additive presets like dimmer)
+// Stores RAW values before master dimmer scaling
+const currentDMXState = ref<number[]>(new Array(100).fill(0))
 
 // ═══════════════════════════════════════════════════════════════
 // STORAGE
@@ -512,30 +517,74 @@ export function useDMXStore() {
   // ═══════════════════════════════════════════════════════════════
   const { sendDMX, isConnected: serialConnected } = useUnifiedSerial()
 
+  // Apply master dimmer scaling to a dimmer value (9-134 range for pinspot)
+  function applyDimmerScale(baseDimmer: number): number {
+    const scale = masterDimmer.value / 100
+    if (baseDimmer >= 9 && baseDimmer <= 134) {
+      const intensity = (baseDimmer - 9) / 125
+      return Math.round(9 + intensity * scale * 125)
+    } else if (baseDimmer >= 240) {
+      // Full mode: convert to scaled dimmer
+      return Math.round(9 + scale * 125)
+    }
+    return baseDimmer
+  }
+
+  // Apply master dimmer to all device dimmers and send
+  function sendDMXWithDimmer() {
+    const dmx = [...currentDMXState.value]
+
+    // Apply master dimmer to all devices' channel 0
+    for (const device of devices.value) {
+      const idx = device.startChannel - 1
+      if (idx >= 0 && idx < dmx.length) {
+        dmx[idx] = applyDimmerScale(currentDMXState.value[idx])
+      }
+    }
+
+    sendDMX(dmx)
+    return dmx
+  }
+
   // Apply preset to selected device and send DMX (for testing mode)
   function applyPresetToDevice(presetId: string, deviceId: string) {
     const preset = getPreset(presetId)
     const device = getDevice(deviceId)
     if (!preset || !device) return
 
-    // Build DMX array (100 channels max)
-    const dmx = new Array(100).fill(0)
     const channels = presetToChannels(preset)
     const start = device.startChannel - 1
 
-    for (let i = 0; i < channels.length && start + i < 100; i++) {
-      dmx[start + i] = channels[i]
+    // For dimmer presets: only update channel 0 (dimmer), preserve current RGB state
+    if (preset.category === 'dimmer') {
+      // Store RAW dimmer value (before scaling)
+      currentDMXState.value[start] = channels[0]
+      const sent = sendDMXWithDimmer()
+      console.log('[DMX] Sent DIMMER preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ') raw:', channels[0], 'scaled:', sent[start], 'master:', masterDimmer.value, '%')
+      return
     }
 
-    // Send to serial
-    sendDMX(dmx)
-    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ')', dmx)
+    // For normal presets: update all channels and track RAW state
+    for (let i = 0; i < channels.length && start + i < 100; i++) {
+      currentDMXState.value[start + i] = channels[i]
+    }
+
+    // Send with master dimmer applied
+    const sent = sendDMXWithDimmer()
+    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ') master:', masterDimmer.value, '%', sent.slice(0, 10))
   }
 
   // Send blackout (all zeros)
   function sendBlackout() {
-    sendDMX(new Array(100).fill(0))
+    currentDMXState.value = new Array(100).fill(0)
+    sendDMX(currentDMXState.value)
     console.log('[DMX] Blackout sent')
+  }
+
+  // Refresh DMX output with current master dimmer (for testing mode when dimmer slider changes)
+  function refreshDMXWithDimmer() {
+    sendDMXWithDimmer()
+    console.log('[DMX] Refreshed with master dimmer:', masterDimmer.value, '%')
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -561,6 +610,40 @@ export function useDMXStore() {
   }
 
   // Get DMX array for active set at current beat (with additive mixing + auto-blackout)
+  // Get active audio reactive settings for current beat (preset + device combos)
+  interface ActiveAudioReactive {
+    preset: Preset
+    device: Device
+    channelIdx: number  // Absolute DMX channel index (0-indexed)
+  }
+
+  function getActiveAudioReactiveSettings(set: Set, beat: number): ActiveAudioReactive[] {
+    const result: ActiveAudioReactive[] = []
+    const hasSolo = set.tracks.some(t => t.solo)
+
+    for (const clip of set.clips) {
+      if (beat < clip.startBeat || beat >= clip.startBeat + clip.duration) continue
+
+      const track = set.tracks.find(t => t.id === clip.trackId)
+      if (!track || track.muted) continue
+      if (hasSolo && !track.solo) continue
+
+      const preset = getPreset(clip.presetId)
+      if (!preset?.audioReactive?.enabled) continue
+
+      const targetDevices = getTargetDevices(track.targetType, track.targetId)
+      for (const device of targetDevices) {
+        result.push({
+          preset,
+          device,
+          channelIdx: device.startChannel - 1 + preset.audioReactive.channel,
+        })
+      }
+    }
+
+    return result
+  }
+
   function getSetDMX(set: Set, beat: number): number[] {
     // Start with all zeros (auto-blackout for inactive channels!)
     const dmx = new Array(512).fill(0)
@@ -579,20 +662,14 @@ export function useDMXStore() {
       if (hasSolo && !track.solo) continue
 
       const preset = getPreset(clip.presetId)
-      if (!preset) {
-        console.log('[getSetDMX] Preset not found:', clip.presetId)
-        continue
-      }
+      if (!preset) continue
 
       const targetDevices = getTargetDevices(track.targetType, track.targetId)
-      console.log('[getSetDMX] beat', beat, '| track:', track.name, '| preset:', preset.name, '| devices:', targetDevices.map(d => d.name))
 
       // Apply preset to all devices (ADDITIVE merge - colors mix!)
       for (const device of targetDevices) {
         const channels = presetToChannels(preset)
         const start = device.startChannel - 1 // DMX is 1-indexed
-
-        console.log('[getSetDMX]   -> device:', device.name, 'ch', device.startChannel, '| preset channels:', channels)
 
         for (let i = 0; i < channels.length && start + i < 512; i++) {
           // Additive: add values, cap at 255
@@ -713,6 +790,7 @@ export function useDMXStore() {
     getProfile,
     getTargetDevices,
     getSetDMX,
+    getActiveAudioReactiveSettings,
     getOverlappingDevices,
 
     // DMX output
@@ -720,6 +798,7 @@ export function useDMXStore() {
     applyPresetToDevice,
     sendBlackout,
     sendDMX,
+    refreshDMXWithDimmer,
 
     // Storage
     loadFromStorage,

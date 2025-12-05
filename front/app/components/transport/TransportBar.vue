@@ -1,7 +1,12 @@
 <script setup lang="ts">
 import type { AudioBand } from '~/composables/useAudioReactive'
+import MIDIConfigModal from '~/components/midi/MIDIConfigModal.vue'
+import { useMIDIMapper } from '~/composables/useMIDIMapper'
 
 const { state: linkState, connected, connect: connectLink, disconnect: disconnectLink } = useAbletonLink()
+
+// Initialize MIDI mapper (activates event processing)
+useMIDIMapper()
 const {
   isConnected: serialConnected,
   connect: connectSerial,
@@ -37,6 +42,9 @@ import type { DimmerChannelConfig } from '~/composables/useSetPlayer'
 
 // Confirmation for exiting performance mode
 const showExitConfirm = ref(false)
+
+// MIDI config modal
+const showMIDIConfig = ref(false)
 
 // Audio config modal
 const showAudioConfig = ref(false)
@@ -329,29 +337,30 @@ function confirmExitPerformance() {
 
     <!-- Master Dimmer -->
     <div class="master-dimmer">
-      <button
-        class="text-[10px] text-zinc-500 uppercase font-semibold hover:text-amber-400 transition-colors"
-        title="Configure dimmer channels"
-        @click="openDimmerConfig"
-      >
-        Dim
-        <span v-if="dimmerChannels.length > 0" class="text-amber-400">({{ dimmerChannels.length }})</span>
-      </button>
+      <span class="text-[10px] text-zinc-500 uppercase font-semibold">Dim</span>
       <input
         type="range"
         :value="masterDimmer"
         min="0"
         max="100"
         class="dimmer-slider"
-        :disabled="dimmerChannels.length === 0"
-        :title="dimmerChannels.length === 0 ? 'Click Dim to configure channels' : ''"
+        title="Master dimmer - applies to all devices"
         @input="(e) => setMasterDimmer(Number((e.target as HTMLInputElement).value))"
       />
       <span
         class="text-xs font-mono w-8 text-right"
-        :class="masterDimmer < 100 && dimmerChannels.length > 0 ? 'text-amber-400' : 'text-zinc-500'"
+        :class="masterDimmer < 100 ? 'text-amber-400' : 'text-zinc-500'"
       >{{ masterDimmer }}%</span>
     </div>
+
+    <!-- MIDI Config -->
+    <button
+      class="text-[10px] text-zinc-500 uppercase font-semibold hover:text-green-400 transition-colors px-2"
+      title="MIDI Configuration"
+      @click="showMIDIConfig = true"
+    >
+      MIDI
+    </button>
 
     <div class="flex-1" />
 
@@ -590,6 +599,12 @@ function confirmExitPerformance() {
         </div>
       </div>
     </Teleport>
+
+    <!-- MIDI Config Modal -->
+    <MIDIConfigModal
+      :open="showMIDIConfig"
+      @update:open="showMIDIConfig = $event"
+    />
 
     <!-- Dimmer Config Modal -->
     <Teleport to="body">

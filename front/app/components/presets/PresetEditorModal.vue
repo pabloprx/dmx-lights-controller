@@ -1,8 +1,9 @@
 <script setup lang="ts">
-import type { PresetValues, StrobeSpeed, DeviceProfile, Preset } from '~/types/dmx'
+import type { PresetValues, StrobeSpeed, DeviceProfile, Preset, PresetAudioReactive, AudioBand, AudioCurve } from '~/types/dmx'
 import {
   createDefaultValues,
   createDefaultChannelValues,
+  createDefaultAudioReactive,
   getPreviewColor,
   getPresetDisplayColor,
   valuesToDMX,
@@ -26,7 +27,7 @@ const emit = defineEmits<{
 }>()
 
 const store = useDMXStore()
-const { sendDMX } = useUnifiedSerial()
+const { sendDMX, audioLevels } = useUnifiedSerial()
 
 // Get device and profile info
 const device = computed(() => store.getDevice(props.deviceId))
@@ -42,6 +43,44 @@ const rgbwValues = ref<PresetValues>(createDefaultValues())
 
 // Form state - Generic channel values (for sliders profiles)
 const channelValues = ref<number[]>([])
+
+// Form state - Audio reactive settings
+const audioReactive = ref<PresetAudioReactive>(createDefaultAudioReactive())
+
+// Audio band options
+const audioBandOptions: { value: AudioBand; label: string }[] = [
+  { value: 'bass', label: 'Bass' },
+  { value: 'mid', label: 'Mids' },
+  { value: 'high', label: 'Highs' },
+]
+
+// Curve options for audio response
+const curveOptions: { value: AudioCurve; label: string; icon: string }[] = [
+  { value: 'square', label: 'Square', icon: '⊓' },   // Instant on/off
+  { value: 'linear', label: 'Linear', icon: '⟋' },   // Proportional
+  { value: 'sine', label: 'Smooth', icon: '∿' },     // Ease in-out
+]
+
+// Channel options for audio modulation
+const channelOptions = computed(() => {
+  if (controlType.value === 'rgbw') {
+    return [
+      { value: 0, label: 'Dimmer' },
+      { value: 1, label: 'Red' },
+      { value: 2, label: 'Green' },
+      { value: 3, label: 'Blue' },
+      { value: 4, label: 'White' },
+    ]
+  }
+  // For other profiles, use channel names from profile
+  if (profile.value?.channels) {
+    return profile.value.channels.map((ch, idx) => ({
+      value: idx,
+      label: ch.name,
+    }))
+  }
+  return [{ value: 0, label: 'Ch 1' }]
+})
 
 // Track original values for discard
 const originalDMX = ref<number[]>([])
@@ -62,6 +101,12 @@ watch([() => props.open, () => props.preset], ([isOpen]) => {
     if (props.preset.channelValues) {
       channelValues.value = [...props.preset.channelValues]
     }
+    // Load audio reactive settings
+    if (props.preset.audioReactive) {
+      audioReactive.value = { ...props.preset.audioReactive }
+    } else {
+      audioReactive.value = createDefaultAudioReactive()
+    }
   } else {
     // Creating new preset
     const beatLabel = props.beat ? ` B${props.beat}` : ''
@@ -73,6 +118,8 @@ watch([() => props.open, () => props.preset], ([isOpen]) => {
     } else if (profile.value) {
       channelValues.value = createDefaultChannelValues(profile.value.id)
     }
+    // Reset audio reactive to default
+    audioReactive.value = createDefaultAudioReactive()
   }
 }, { immediate: true })
 
@@ -152,6 +199,11 @@ function handleSave() {
     preset.values = { ...rgbwValues.value }
   } else {
     preset.channelValues = [...channelValues.value]
+  }
+
+  // Include audio reactive settings if enabled
+  if (audioReactive.value.enabled) {
+    preset.audioReactive = { ...audioReactive.value }
   }
 
   emit('save', preset)
@@ -284,9 +336,19 @@ function handleCancel() {
             </div>
           </div>
 
-          <!-- RGBW Sliders -->
+          <!-- White (opacity/fill) Slider - before colors -->
           <div class="flex flex-col gap-2">
-            <label class="text-xs text-neutral-400">RGBW</label>
+            <label class="text-xs text-neutral-400">White LED (fill/opacity)</label>
+            <div class="flex items-center gap-2">
+              <span class="w-6 text-xs font-bold text-neutral-200">W</span>
+              <input v-model.number="rgbwValues.white" type="range" min="0" max="255" class="flex-1 accent-neutral-300">
+              <span class="w-8 text-xs text-neutral-400 text-right font-mono">{{ rgbwValues.white }}</span>
+            </div>
+          </div>
+
+          <!-- RGB Sliders -->
+          <div class="flex flex-col gap-2">
+            <label class="text-xs text-neutral-400">RGB Color</label>
             <div class="grid gap-2">
               <div class="flex items-center gap-2">
                 <span class="w-6 text-xs font-bold text-red-400">R</span>
@@ -302,11 +364,6 @@ function handleCancel() {
                 <span class="w-6 text-xs font-bold text-blue-400">B</span>
                 <input v-model.number="rgbwValues.blue" type="range" min="0" max="255" class="flex-1 accent-blue-500">
                 <span class="w-8 text-xs text-neutral-400 text-right font-mono">{{ rgbwValues.blue }}</span>
-              </div>
-              <div class="flex items-center gap-2">
-                <span class="w-6 text-xs font-bold text-neutral-200">W</span>
-                <input v-model.number="rgbwValues.white" type="range" min="0" max="255" class="flex-1 accent-white">
-                <span class="w-8 text-xs text-neutral-400 text-right font-mono">{{ rgbwValues.white }}</span>
               </div>
             </div>
           </div>
@@ -342,6 +399,145 @@ function handleCancel() {
             </div>
           </div>
         </template>
+
+        <!-- ════════════════════════════════════════════════════════════
+             AUDIO REACTIVE SETTINGS
+             ════════════════════════════════════════════════════════════ -->
+        <div class="flex flex-col gap-3 pt-3 border-t border-neutral-700">
+          <div class="flex items-center justify-between">
+            <label class="text-xs text-neutral-400 flex items-center gap-2">
+              <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+              </svg>
+              Audio Reactive
+            </label>
+            <button
+              class="px-3 py-1 rounded text-xs font-medium transition-colors"
+              :class="audioReactive.enabled ? 'bg-purple-600 text-white' : 'bg-neutral-700 text-neutral-400'"
+              @click="audioReactive.enabled = !audioReactive.enabled"
+            >
+              {{ audioReactive.enabled ? 'ON' : 'OFF' }}
+            </button>
+          </div>
+
+          <template v-if="audioReactive.enabled">
+            <!-- Band Selection -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 w-16">Follow:</span>
+              <div class="flex gap-1">
+                <button
+                  v-for="opt in audioBandOptions"
+                  :key="opt.value"
+                  class="px-3 py-1 rounded text-xs font-medium transition-colors"
+                  :class="audioReactive.band === opt.value
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'"
+                  @click="audioReactive.band = opt.value"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+              <!-- Live level indicator with gate marker -->
+              <div class="flex-1 h-3 bg-neutral-800 rounded overflow-hidden ml-2 relative">
+                <!-- Gate threshold marker -->
+                <div
+                  class="absolute top-0 bottom-0 w-0.5 bg-neutral-500 z-10"
+                  :style="{ left: `${audioReactive.threshold}%` }"
+                />
+                <!-- Level bar - changes color when above gate -->
+                <div
+                  class="h-full transition-all duration-75"
+                  :class="audioLevels[audioReactive.band] >= audioReactive.threshold ? 'bg-red-500' : 'bg-purple-500/50'"
+                  :style="{ width: `${audioLevels[audioReactive.band]}%` }"
+                />
+              </div>
+              <!-- Active indicator -->
+              <div
+                class="w-2 h-2 rounded-full transition-colors"
+                :class="audioLevels[audioReactive.band] >= audioReactive.threshold ? 'bg-red-500 animate-pulse' : 'bg-neutral-600'"
+              />
+            </div>
+
+            <!-- Channel to modulate -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 w-16">Channel:</span>
+              <select
+                v-model.number="audioReactive.channel"
+                class="flex-1 px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm text-white"
+              >
+                <option v-for="opt in channelOptions" :key="opt.value" :value="opt.value">
+                  {{ opt.label }}
+                </option>
+              </select>
+            </div>
+
+            <!-- Threshold - gate for when to start reacting -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 w-16">Gate:</span>
+              <input
+                v-model.number="audioReactive.threshold"
+                type="range"
+                min="0"
+                max="100"
+                class="flex-1 accent-purple-500"
+              >
+              <span class="w-10 text-xs text-neutral-400 text-right font-mono">{{ audioReactive.threshold }}%</span>
+            </div>
+            <div class="text-[10px] text-neutral-500 -mt-1 ml-16">
+              Only react when audio level is above this
+            </div>
+
+            <!-- Output Range - min/max intensity -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 w-16">Output:</span>
+              <div class="flex-1 flex items-center gap-2">
+                <input
+                  v-model.number="audioReactive.min"
+                  type="number"
+                  min="0"
+                  max="100"
+                  class="w-14 px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm text-white text-center"
+                >
+                <span class="text-neutral-500">%</span>
+                <span class="text-neutral-600">to</span>
+                <input
+                  v-model.number="audioReactive.max"
+                  type="number"
+                  min="0"
+                  max="100"
+                  class="w-14 px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm text-white text-center"
+                >
+                <span class="text-neutral-500">%</span>
+              </div>
+            </div>
+            <div class="text-[10px] text-neutral-500 -mt-1 ml-16">
+              Channel intensity range (e.g. 80-100% = never off, pulses on peaks)
+            </div>
+
+            <!-- Curve selector -->
+            <div class="flex items-center gap-2">
+              <span class="text-xs text-neutral-400 w-16">Curve:</span>
+              <div class="flex gap-1">
+                <button
+                  v-for="opt in curveOptions"
+                  :key="opt.value"
+                  class="px-3 py-1 rounded text-xs font-medium transition-colors flex items-center gap-1"
+                  :class="audioReactive.curve === opt.value
+                    ? 'bg-purple-600 text-white'
+                    : 'bg-neutral-700 text-neutral-300 hover:bg-neutral-600'"
+                  @click="audioReactive.curve = opt.value"
+                  :title="opt.label"
+                >
+                  <span class="text-base">{{ opt.icon }}</span>
+                  <span>{{ opt.label }}</span>
+                </button>
+              </div>
+            </div>
+            <div class="text-[10px] text-neutral-500 -mt-1 ml-16">
+              Square = instant, Linear = proportional, Smooth = eased
+            </div>
+          </template>
+        </div>
       </div>
 
       <DialogFooter class="flex gap-2">
@@ -354,7 +550,9 @@ function handleCancel() {
         </Button>
         <div class="flex-1" />
         <Button variant="secondary" @click="handleCancel">Cancel</Button>
-        <Button class="bg-green-600 hover:bg-green-700 text-white" @click="handleSave">Save</Button>
+        <Button class="bg-green-600 hover:bg-green-700 text-white" @click="handleSave">
+          {{ preset ? 'Update' : 'Save' }}
+        </Button>
       </DialogFooter>
     </DialogContent>
   </Dialog>

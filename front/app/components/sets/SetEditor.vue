@@ -230,6 +230,27 @@ function handleClipMouseMove(event: MouseEvent) {
     target.style.cursor = 'grab'
   }
 }
+
+// Right-click on clip to edit preset
+function handleClipContextMenu(event: MouseEvent, clip: SetClip, trackId: string) {
+  event.preventDefault()
+
+  const preset = store.getPreset(clip.presetId)
+  if (!preset) return
+
+  // Open preset editor with existing preset data
+  openPresetEditor(trackId, clip.startBeat, preset)
+}
+
+// Handle saving edited preset (updates the existing preset)
+function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
+  if (!currentSet.value || !presetEditorExistingPreset.value) return
+
+  // Update the existing preset in library
+  store.updatePreset(presetEditorExistingPreset.value.id, presetData)
+
+  showPresetEditor.value = false
+}
 </script>
 
 <template>
@@ -372,6 +393,7 @@ function handleClipMouseMove(event: MouseEvent) {
                 }"
                 @mousedown.stop="handleClipMouseDown($event, getClipAtBeat(track.id, beat)!)"
                 @mousemove="handleClipMouseMove($event)"
+                @contextmenu="handleClipContextMenu($event, getClipAtBeat(track.id, beat)!, track.id)"
               >
                 <span class="clip-name">
                   {{ store.getPreset(getClipAtBeat(track.id, beat)!.presetId)?.name }}
@@ -553,7 +575,7 @@ function handleClipMouseMove(event: MouseEvent) {
       :preset="presetEditorExistingPreset"
       :beat="presetEditorBeat"
       @update:open="showPresetEditor = $event"
-      @save="handlePresetSave"
+      @save="presetEditorExistingPreset ? handlePresetUpdate($event) : handlePresetSave($event)"
       @discard="handlePresetDiscard"
     />
   </div>
