@@ -1,0 +1,11 @@
+services:
+  dmx-controller:
+    build: .
+    ports:
+      - "3010:3010"
+    volumes:
+      # Hot reload: sync your code changes into container
+      - ./front:/app
+      # Don't sync node_modules (use container's built modules)
+      - /app/node_modules
+      - /app/.nuxt
