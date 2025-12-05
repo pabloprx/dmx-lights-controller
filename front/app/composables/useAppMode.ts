@@ -48,7 +48,7 @@ export function useAppMode() {
   function triggerBlackout() {
     blackout.value = true
     if (serialConnected.value) {
-      sendDMX(new Array(16).fill(0))
+      sendDMX(new Array(100).fill(0))
     }
   }
 

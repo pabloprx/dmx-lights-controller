@@ -74,7 +74,8 @@ export interface Preset {
   id: string
   name: string
   profileId: string               // Linked to PROFILE, not device
-  values: PresetValues
+  values?: PresetValues           // For RGBW profiles (backwards compat)
+  channelValues?: number[]        // For non-RGBW profiles (Laser, etc.)
   isBuiltIn: boolean              // System presets vs user-created
   category: PresetCategory
 }
@@ -191,16 +192,16 @@ export const LASER_10CH: DeviceProfile = {
   channelCount: 10,
   controlType: 'sliders',
   channels: [
-    { offset: 0, name: 'Mode', type: 'other', min: 0, max: 255, defaultValue: 64, description: 'Manual mode = 64' },
-    { offset: 1, name: 'Patterns', type: 'other', min: 0, max: 255, defaultValue: 0 },
-    { offset: 2, name: 'Rotation', type: 'other', min: 0, max: 255, defaultValue: 0 },
-    { offset: 3, name: 'H. Control', type: 'other', min: 0, max: 255, defaultValue: 0 },
-    { offset: 4, name: 'V. Control', type: 'other', min: 0, max: 255, defaultValue: 0 },
-    { offset: 5, name: 'H. Position', type: 'other', min: 0, max: 255, defaultValue: 128 },
-    { offset: 6, name: 'V. Position', type: 'other', min: 0, max: 255, defaultValue: 128 },
-    { offset: 7, name: 'Size', type: 'other', min: 0, max: 255, defaultValue: 128 },
-    { offset: 8, name: 'Color', type: 'other', min: 0, max: 255, defaultValue: 0 },
-    { offset: 9, name: 'Beam', type: 'other', min: 0, max: 255, defaultValue: 255 },
+    { offset: 0, name: 'Mode', type: 'other', min: 0, max: 255, defaultValue: 64, description: '0-63:OFF | 64-127:Manual | 128-191:Auto | 192-255:Sound' },
+    { offset: 1, name: 'Pattern', type: 'other', min: 0, max: 255, defaultValue: 0, description: '51 patterns (0-255)' },
+    { offset: 2, name: 'Rotation', type: 'other', min: 0, max: 255, defaultValue: 0, description: '0-127:angle | 128-191:CW | 192-255:CCW' },
+    { offset: 3, name: 'H. Flip', type: 'other', min: 0, max: 255, defaultValue: 0, description: '0-127:position | 128-255:speed' },
+    { offset: 4, name: 'V. Flip', type: 'other', min: 0, max: 255, defaultValue: 0, description: '0-127:position | 128-255:speed' },
+    { offset: 5, name: 'H. Pos', type: 'other', min: 0, max: 255, defaultValue: 128, description: '0-127:position | 128-255:move speed' },
+    { offset: 6, name: 'V. Pos', type: 'other', min: 0, max: 255, defaultValue: 128, description: '0-127:position | 128-255:move speed' },
+    { offset: 7, name: 'Size', type: 'other', min: 0, max: 255, defaultValue: 64, description: '0-63:fixed | 64-127:grow | 128-191:shrink | 192-255:zoom' },
+    { offset: 8, name: 'Color', type: 'other', min: 0, max: 255, defaultValue: 0, description: '0-63:mono | 64-127:mix | 128-191:auto mono | 192-255:auto' },
+    { offset: 9, name: 'Dots', type: 'other', min: 0, max: 255, defaultValue: 0, description: '0-127:dots+lines | 128-255:dots only' },
   ],
 }
 
@@ -348,5 +349,57 @@ export function getPreviewColor(values: PresetValues): string {
 
 // Get preset color for UI (simpler - just returns the color hex)
 export function getPresetColor(preset: Preset): string {
-  return getPreviewColor(preset.values)
+  if (preset.values) {
+    return getPreviewColor(preset.values)
+  }
+  return getPresetDisplayColor(preset)
+}
+
+// ═══════════════════════════════════════════════════════════════
+// GENERIC PRESET HELPERS (for non-RGBW profiles)
+// ═══════════════════════════════════════════════════════════════
+
+// Convert preset to DMX channel array (works for any profile)
+export function presetToChannels(preset: Preset): number[] {
+  // If preset has RGBW values, convert using valuesToDMX
+  if (preset.values) {
+    return valuesToDMX(preset.values)
+  }
+  // If preset has generic channel values, return them directly
+  if (preset.channelValues) {
+    return [...preset.channelValues]
+  }
+  // Fallback: return empty array
+  return []
+}
+
+// Get display color for preset (for grid clip display)
+export function getPresetDisplayColor(preset: Preset): string {
+  const profile = getProfileById(preset.profileId)
+
+  // For RGBW profiles, use existing color logic
+  if (profile?.controlType === 'rgbw' && preset.values) {
+    return getPreviewColor(preset.values)
+  }
+
+  // For slider profiles, try to derive color from a "Color" channel
+  if (preset.channelValues && profile?.controlType === 'sliders') {
+    const colorChannel = profile.channels.find(c => c.name === 'Color')
+    if (colorChannel) {
+      const colorValue = preset.channelValues[colorChannel.offset] || 0
+      // Map 0-255 to hue 0-360
+      const hue = (colorValue / 255) * 360
+      return `hsl(${hue}, 70%, 50%)`
+    }
+  }
+
+  // Default purple for unknown profiles
+  return '#8b5cf6'
+}
+
+// Create default channel values for a profile
+export function createDefaultChannelValues(profileId: string): number[] {
+  const profile = getProfileById(profileId)
+  if (!profile) return []
+  return profile.channels.map(ch => ch.defaultValue)
 }

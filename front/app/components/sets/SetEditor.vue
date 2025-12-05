@@ -2,12 +2,13 @@
 import { useDMXStore } from '~/composables/useDMXStore'
 import { useSetPlayer } from '~/composables/useSetPlayer'
 import { useClipDrag } from '~/composables/useClipDrag'
-import { TRACK_COLORS } from '~/types/dmx'
-import type { SetClip } from '~/types/dmx'
+import { TRACK_COLORS, getPresetDisplayColor, getProfileById } from '~/types/dmx'
+import type { SetClip, Preset } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
+import PresetEditorModal from '~/components/presets/PresetEditorModal.vue'
 
 const store = useDMXStore()
 const player = useSetPlayer()
@@ -80,6 +81,63 @@ function handleLoadScene() {
   showLoadScene.value = false
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PRESET EDITOR MODAL
+// ═══════════════════════════════════════════════════════════════
+const showPresetEditor = ref(false)
+const presetEditorDeviceId = ref<string>('')
+const presetEditorBeat = ref<number>(1)
+const presetEditorTrackId = ref<string>('')
+const presetEditorExistingPreset = ref<Preset | null>(null)
+
+// Get target device for a track (for preview)
+function getTrackTargetDeviceId(trackId: string): string | null {
+  if (!currentSet.value) return null
+  const track = currentSet.value.tracks.find(t => t.id === trackId)
+  if (!track) return null
+
+  if (track.targetType === 'device') {
+    return track.targetId
+  } else {
+    // Group: return first device
+    const group = store.getGroup(track.targetId)
+    return group?.deviceIds[0] || null
+  }
+}
+
+function openPresetEditor(trackId: string, beat: number, existingPreset: Preset | null = null) {
+  const deviceId = getTrackTargetDeviceId(trackId)
+  if (!deviceId) return
+
+  presetEditorDeviceId.value = deviceId
+  presetEditorBeat.value = beat
+  presetEditorTrackId.value = trackId
+  presetEditorExistingPreset.value = existingPreset
+  showPresetEditor.value = true
+}
+
+function handlePresetSave(presetData: Omit<Preset, 'id'>) {
+  if (!currentSet.value) return
+
+  // Add preset to library
+  const newPreset = store.addPreset(presetData)
+
+  // Add clip at the beat
+  store.addClipToSet(
+    currentSet.value.id,
+    presetEditorTrackId.value,
+    newPreset.id,
+    presetEditorBeat.value,
+    1
+  )
+
+  showPresetEditor.value = false
+}
+
+function handlePresetDiscard() {
+  showPresetEditor.value = false
+}
+
 // Get clips for a track
 function getTrackClips(trackId: string) {
   if (!currentSet.value) return []
@@ -91,16 +149,13 @@ function getClipColor(presetId: string): string {
   const preset = store.getPreset(presetId)
   if (!preset) return 'hsl(var(--muted))'
 
-  const { red, green, blue, white } = preset.values
-  const r = Math.min(255, red + white * 0.5)
-  const g = Math.min(255, green + white * 0.5)
-  const b = Math.min(255, blue + white * 0.5)
-  return `rgb(${Math.round(r)}, ${Math.round(g)}, ${Math.round(b)})`
+  // Use the new helper that handles both RGBW and slider profiles
+  return getPresetDisplayColor(preset)
 }
 
-// Handle cell click (place/remove clip)
+// Handle cell click (place/remove clip or open editor)
 function handleCellClick(trackId: string, beat: number) {
-  if (!currentSet.value || !store.selectedPresetId.value) return
+  if (!currentSet.value) return
 
   // Check if there's already a clip at this position
   const existingClip = currentSet.value.clips.find(
@@ -108,11 +163,25 @@ function handleCellClick(trackId: string, beat: number) {
   )
 
   if (existingClip) {
-    // Remove existing clip
+    // Existing clip: remove it (double-click to edit could be added later)
     store.deleteClip(currentSet.value.id, existingClip.id)
   } else {
-    // Add new clip with selected preset
-    store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1)
+    // No clip: check if we have a selected preset, otherwise open editor
+    if (store.selectedPresetId.value) {
+      // If preset is selected AND matches the track's profile, use it directly
+      const preset = store.getPreset(store.selectedPresetId.value)
+      const deviceId = getTrackTargetDeviceId(trackId)
+      const device = deviceId ? store.getDevice(deviceId) : null
+
+      if (preset && device && preset.profileId === device.profileId) {
+        // Selected preset matches track profile - use it
+        store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1)
+        return
+      }
+    }
+
+    // No matching preset selected - open the editor modal
+    openPresetEditor(trackId, beat)
   }
 }
 
@@ -476,6 +545,17 @@ function handleClipMouseMove(event: MouseEvent) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    <!-- Preset Editor Modal -->
+    <PresetEditorModal
+      :open="showPresetEditor"
+      :device-id="presetEditorDeviceId"
+      :preset="presetEditorExistingPreset"
+      :beat="presetEditorBeat"
+      @update:open="showPresetEditor = $event"
+      @save="handlePresetSave"
+      @discard="handlePresetDiscard"
+    />
   </div>
 </template>
 

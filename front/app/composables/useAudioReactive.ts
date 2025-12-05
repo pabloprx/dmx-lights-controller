@@ -35,8 +35,8 @@ export function useAudioReactive() {
     for (const device of devices) {
       const start = device.startChannel - 1 // 0-indexed
 
-      // Only modulate if within our 16-channel window
-      if (start < 16) {
+      // Only modulate if within our 100-channel window
+      if (start < 100) {
         // Channel 0 relative to device is the dimmer
         const dimmerChannel = start
 

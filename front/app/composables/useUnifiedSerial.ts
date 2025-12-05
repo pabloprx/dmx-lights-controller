@@ -7,13 +7,35 @@ export interface AudioLevels {
   high: number
 }
 
+export interface AudioConfig {
+  bassMax: number
+  midMax: number
+  highMax: number
+  bassSilence: number
+  midSilence: number
+  highSilence: number
+  noiseFloor: number
+}
+
+const DEFAULT_CONFIG: AudioConfig = {
+  bassMax: 200000,
+  midMax: 300000,
+  highMax: 250000,
+  bassSilence: 30,
+  midSilence: 20,
+  highSilence: 25,
+  noiseFloor: 15,
+}
+
 const audioLevels = ref<AudioLevels>({ bass: 0, mid: 0, high: 0 })
+const audioConfig = ref<AudioConfig>({ ...DEFAULT_CONFIG })
 const isConnected = ref(false)
 const port = ref<SerialPort | null>(null)
 const writer = ref<WritableStreamDefaultWriter<Uint8Array> | null>(null)
 const reader = ref<ReadableStreamDefaultReader<string> | null>(null)
 
 let buffer = ''
+const STORAGE_KEY = 'dmx-audio-config'
 
 export function useUnifiedSerial() {
   async function connect() {
@@ -35,6 +57,13 @@ export function useUnifiedSerial() {
 
       // Start read loop for audio input
       readLoop()
+
+      // Load saved config and sync with Arduino
+      loadConfigFromStorage()
+      // Give Arduino a moment to initialize, then request its config
+      setTimeout(() => {
+        requestConfig()
+      }, 500)
 
       return true
     } catch (error) {
@@ -103,6 +132,23 @@ export function useUnifiedSerial() {
 
     try {
       const data = JSON.parse(line)
+
+      // Config response from Arduino
+      if (data.type === 'config') {
+        audioConfig.value = {
+          bassMax: data.bassMax ?? DEFAULT_CONFIG.bassMax,
+          midMax: data.midMax ?? DEFAULT_CONFIG.midMax,
+          highMax: data.highMax ?? DEFAULT_CONFIG.highMax,
+          bassSilence: data.bassSilence ?? DEFAULT_CONFIG.bassSilence,
+          midSilence: data.midSilence ?? DEFAULT_CONFIG.midSilence,
+          highSilence: data.highSilence ?? DEFAULT_CONFIG.highSilence,
+          noiseFloor: data.noiseFloor ?? DEFAULT_CONFIG.noiseFloor,
+        }
+        console.log('[Serial] Config received:', audioConfig.value)
+        return
+      }
+
+      // Audio levels
       if (
         typeof data.bass === 'number' &&
         typeof data.mid === 'number' &&
@@ -123,11 +169,11 @@ export function useUnifiedSerial() {
   async function sendDMX(channels: number[]) {
     if (!writer.value || !isConnected.value) return
 
-    // Pad to 16 channels
+    // Pad to 100 channels
     const padded = [...channels]
-    while (padded.length < 16) padded.push(0)
+    while (padded.length < 100) padded.push(0)
 
-    const csv = padded.slice(0, 16).join(',') + '\n'
+    const csv = padded.slice(0, 100).join(',') + '\n'
     const encoder = new TextEncoder()
 
     try {
@@ -137,11 +183,89 @@ export function useUnifiedSerial() {
     }
   }
 
+  // Request current config from Arduino
+  async function requestConfig() {
+    if (!writer.value || !isConnected.value) return
+    const encoder = new TextEncoder()
+    try {
+      await writer.value.write(encoder.encode('CFG:GET\n'))
+    } catch (error) {
+      console.error('Failed to request config:', error)
+    }
+  }
+
+  // Send a single config value to Arduino
+  async function sendConfigValue(key: keyof AudioConfig, value: number) {
+    if (!writer.value || !isConnected.value) return
+    const encoder = new TextEncoder()
+    try {
+      await writer.value.write(encoder.encode(`CFG:${key}=${value}\n`))
+      // Update local state
+      audioConfig.value = { ...audioConfig.value, [key]: value }
+      // Save to localStorage
+      saveConfigToStorage()
+    } catch (error) {
+      console.error('Failed to send config:', error)
+    }
+  }
+
+  // Send all config values to Arduino
+  async function syncConfigToArduino() {
+    if (!writer.value || !isConnected.value) return
+    const encoder = new TextEncoder()
+    try {
+      for (const [key, value] of Object.entries(audioConfig.value)) {
+        await writer.value.write(encoder.encode(`CFG:${key}=${value}\n`))
+        // Small delay between commands
+        await new Promise(r => setTimeout(r, 50))
+      }
+      console.log('[Serial] Config synced to Arduino')
+    } catch (error) {
+      console.error('Failed to sync config:', error)
+    }
+  }
+
+  // Load config from localStorage
+  function loadConfigFromStorage() {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY)
+      if (saved) {
+        const parsed = JSON.parse(saved)
+        audioConfig.value = { ...DEFAULT_CONFIG, ...parsed }
+        console.log('[Serial] Config loaded from storage:', audioConfig.value)
+      }
+    } catch (error) {
+      console.error('Failed to load config:', error)
+    }
+  }
+
+  // Save config to localStorage
+  function saveConfigToStorage() {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(audioConfig.value))
+    } catch (error) {
+      console.error('Failed to save config:', error)
+    }
+  }
+
+  // Reset config to defaults
+  function resetConfig() {
+    audioConfig.value = { ...DEFAULT_CONFIG }
+    saveConfigToStorage()
+    syncConfigToArduino()
+  }
+
   return {
     audioLevels: readonly(audioLevels),
+    audioConfig: readonly(audioConfig),
     isConnected: readonly(isConnected),
     connect,
     disconnect,
     sendDMX,
+    requestConfig,
+    sendConfigValue,
+    syncConfigToArduino,
+    resetConfig,
+    DEFAULT_CONFIG,
   }
 }

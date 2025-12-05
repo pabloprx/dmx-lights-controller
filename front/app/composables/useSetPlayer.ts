@@ -7,9 +7,41 @@ import { useAppMode } from './useAppMode'
 import { useAudioReactive } from './useAudioReactive'
 import { valuesToDMX } from '~/types/dmx'
 
+// Dimmer channel configuration
+export interface DimmerChannelConfig {
+  channel: number    // DMX channel (1-indexed)
+  min: number        // Min value (e.g., 0)
+  max: number        // Max value (e.g., 134 for pinspot dimmer range)
+}
+
 // Shared state (singleton)
 const isPlaying = ref(false)
 const loopEnabled = ref(true)
+const masterDimmer = ref(100) // 0-100%
+const dimmerChannels = ref<DimmerChannelConfig[]>([])
+
+// Load dimmer config from localStorage
+const DIMMER_CONFIG_KEY = 'dmx-dimmer-config'
+function loadDimmerConfig() {
+  if (typeof window === 'undefined') return
+  try {
+    const saved = localStorage.getItem(DIMMER_CONFIG_KEY)
+    if (saved) {
+      dimmerChannels.value = JSON.parse(saved)
+    }
+  } catch (e) {
+    console.warn('Failed to load dimmer config:', e)
+  }
+}
+function saveDimmerConfig() {
+  if (typeof window === 'undefined') return
+  try {
+    localStorage.setItem(DIMMER_CONFIG_KEY, JSON.stringify(dimmerChannels.value))
+  } catch (e) {
+    console.warn('Failed to save dimmer config:', e)
+  }
+}
+loadDimmerConfig()
 
 // Last sent DMX values for comparison (avoid redundant sends)
 let lastDMXSent: number[] = []
@@ -65,8 +97,10 @@ export function useSetPlayer() {
   })
 
   // Watch beat changes and update DMX
+  // We watch beatInSet (not currentBeat) because that's what determines which preset plays
+  // This ensures we stay synced with Link's bar-aware beat position
   watch(
-    [currentBeat, () => store.activeSetId.value],
+    [beatInSet, () => store.activeSetId.value],
     () => {
       if (!isPlaying.value) return
       if (appMode.blackout.value) {
@@ -108,6 +142,7 @@ export function useSetPlayer() {
   function updateDMX() {
     const set = store.activeSet.value
     if (!set) {
+      console.log('[SetPlayer] No active set, sending blackout')
       sendBlackout()
       return
     }
@@ -116,12 +151,25 @@ export function useSetPlayer() {
     const beat = beatInSet.value
     const dmxValues = store.getSetDMX(set, beat)
 
-    // Only send first 16 channels (hardware limit)
-    let channels = dmxValues.slice(0, 16)
+    console.log('[SetPlayer] updateDMX - beat:', beat, 'set:', set.name, 'clips:', set.clips.length)
+
+    // Use all 100 channels
+    let channels = dmxValues.slice(0, 100)
+
+    // Debug: show non-zero channels
+    const nonZero = channels.map((v, i) => v > 0 ? `ch${i+1}=${v}` : null).filter(Boolean)
+    if (nonZero.length > 0) {
+      console.log('[SetPlayer] Non-zero channels:', nonZero.join(', '))
+    }
 
     // Apply audio modulation if enabled
     if (audioReactive.enabled.value) {
       channels = audioReactive.applyAudioModulation(channels)
+    }
+
+    // Apply master dimmer to configured channels
+    if (masterDimmer.value < 100 && dimmerChannels.value.length > 0) {
+      channels = applyMasterDimmer(channels, masterDimmer.value)
     }
 
     // Skip if values haven't changed
@@ -134,7 +182,7 @@ export function useSetPlayer() {
   }
 
   function sendBlackout() {
-    const blackoutValues = new Array(16).fill(0)
+    const blackoutValues = new Array(100).fill(0)
     if (!arraysEqual(blackoutValues, lastDMXSent)) {
       lastDMXSent = blackoutValues
       serial.sendDMX(blackoutValues)
@@ -147,6 +195,54 @@ export function useSetPlayer() {
       if (a[i] !== b[i]) return false
     }
     return true
+  }
+
+  // Apply master dimmer to configured channels only
+  function applyMasterDimmer(channels: number[], dimmerPercent: number): number[] {
+    const result = [...channels]
+    const scale = dimmerPercent / 100
+
+    for (const config of dimmerChannels.value) {
+      const idx = config.channel - 1 // Convert to 0-indexed
+      if (idx >= 0 && idx < result.length) {
+        // Map the current value proportionally within the min-max range
+        // At 100% dimmer: value stays at max (or current)
+        // At 0% dimmer: value goes to min
+        const range = config.max - config.min
+        const dimmedValue = Math.round(config.min + range * scale)
+        // Only apply if it would reduce the value (dimmer = reduce brightness)
+        result[idx] = Math.min(result[idx], dimmedValue)
+      }
+    }
+
+    return result
+  }
+
+  // Master dimmer control
+  function setMasterDimmer(value: number) {
+    masterDimmer.value = Math.max(0, Math.min(100, value))
+    if (isPlaying.value && !appMode.blackout.value) {
+      lastDMXSent = [] // Force update
+      updateDMX()
+    }
+  }
+
+  // Dimmer channel config functions
+  function addDimmerChannel(config: DimmerChannelConfig) {
+    // Remove existing config for same channel
+    dimmerChannels.value = dimmerChannels.value.filter(c => c.channel !== config.channel)
+    dimmerChannels.value.push(config)
+    saveDimmerConfig()
+  }
+
+  function removeDimmerChannel(channel: number) {
+    dimmerChannels.value = dimmerChannels.value.filter(c => c.channel !== channel)
+    saveDimmerConfig()
+  }
+
+  function clearDimmerChannels() {
+    dimmerChannels.value = []
+    saveDimmerConfig()
   }
 
   // Control functions
@@ -227,6 +323,12 @@ export function useSetPlayer() {
     beatInSet,
     beatPhase,
     loopEnabled,
+    masterDimmer: readonly(masterDimmer),
+    setMasterDimmer,
+    dimmerChannels: readonly(dimmerChannels),
+    addDimmerChannel,
+    removeDimmerChannel,
+    clearDimmerChannels,
     overlappingDevices,
 
     // Link state passthrough

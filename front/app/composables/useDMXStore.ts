@@ -5,7 +5,7 @@ import type {
 } from '~/types/dmx'
 import {
   DEVICE_PROFILES, BUILT_IN_PRESETS, TRACK_COLORS,
-  generateId, createDefaultSet, createDefaultTrack, valuesToDMX, getProfileById
+  generateId, createDefaultSet, createDefaultTrack, valuesToDMX, getProfileById, presetToChannels
 } from '~/types/dmx'
 
 const STORAGE_KEY = 'dmx-store-v3'
@@ -518,23 +518,23 @@ export function useDMXStore() {
     const device = getDevice(deviceId)
     if (!preset || !device) return
 
-    // Build DMX array
-    const dmx = new Array(16).fill(0)
-    const channels = valuesToDMX(preset.values)
+    // Build DMX array (100 channels max)
+    const dmx = new Array(100).fill(0)
+    const channels = presetToChannels(preset)
     const start = device.startChannel - 1
 
-    for (let i = 0; i < channels.length && start + i < 16; i++) {
+    for (let i = 0; i < channels.length && start + i < 100; i++) {
       dmx[start + i] = channels[i]
     }
 
     // Send to serial
     sendDMX(dmx)
-    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, dmx)
+    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ')', dmx)
   }
 
   // Send blackout (all zeros)
   function sendBlackout() {
-    sendDMX(new Array(16).fill(0))
+    sendDMX(new Array(100).fill(0))
     console.log('[DMX] Blackout sent')
   }
 
@@ -579,14 +579,20 @@ export function useDMXStore() {
       if (hasSolo && !track.solo) continue
 
       const preset = getPreset(clip.presetId)
-      if (!preset) continue
+      if (!preset) {
+        console.log('[getSetDMX] Preset not found:', clip.presetId)
+        continue
+      }
 
       const targetDevices = getTargetDevices(track.targetType, track.targetId)
+      console.log('[getSetDMX] beat', beat, '| track:', track.name, '| preset:', preset.name, '| devices:', targetDevices.map(d => d.name))
 
       // Apply preset to all devices (ADDITIVE merge - colors mix!)
       for (const device of targetDevices) {
-        const channels = valuesToDMX(preset.values)
+        const channels = presetToChannels(preset)
         const start = device.startChannel - 1 // DMX is 1-indexed
+
+        console.log('[getSetDMX]   -> device:', device.name, 'ch', device.startChannel, '| preset channels:', channels)
 
         for (let i = 0; i < channels.length && start + i < 512; i++) {
           // Additive: add values, cap at 255

@@ -1,114 +1,214 @@
-/*
- * DMX Beat Controller
- *
- * Receives beat data from Web Serial API
- * Protocol:
- *   B<beatInBar>,<tempo>\n  -> Beat trigger (e.g., "B1,128.5\n")
- *   D<channel>,<value>\n    -> DMX value (e.g., "D1,255\n")
- *
- * LEDs on pins 2,3,4,5 for beats 1,2,3,4
- */
+// DMX Controller with Audio FFT
+// Combined: FFT mic input + DMX output on single ESP32
+//
+// Serial Protocol:
+// - SEND: {"bass":N,"mid":N,"high":N}\n  (every ~60ms)
+// - RECV: ch1,ch2,ch3,...,ch100\n        (CSV DMX values)
+// - RECV: CFG:key=value\n                (config commands)
+//   Valid keys: bassMax, midMax, highMax, bassSilence, midSilence, highSilence, noiseFloor
+// - RECV: CFG:GET\n                      (request current config)
+//
+// Hardware:
+// - MIC_PIN 34: MAX4466 electret microphone
+// - DMX_TX 17: RS485 TX (DI pin)
+// - DMX_EN 4: RS485 enable (DE/RE bridged)
 
-#define SERIAL_BAUD 115200
-#define FLASH_DURATION 80  // ms
+#include <arduinoFFT.h>
 
-// LED pins for each beat (beat 1 = pin 2, beat 2 = pin 3, etc.)
-const int LED_PINS[4] = {2, 3, 4, 5};
+// ═══════════════════════════════════════════════════════════════
+// FFT CONFIG
+// ═══════════════════════════════════════════════════════════════
+#define SAMPLES 512
+#define SAMPLING_FREQ 8000
+#define MIC_PIN 34
 
-String inputBuffer = "";
-unsigned long ledOffTime[4] = {0, 0, 0, 0};
-bool ledOn[4] = {false, false, false, false};
+double vReal[SAMPLES];
+double vImag[SAMPLES];
+ArduinoFFT<double> FFT = ArduinoFFT<double>(vReal, vImag, SAMPLES, SAMPLING_FREQ);
 
+// Audio thresholds (configurable via CFG: commands)
+int bassSilence = 30, midSilence = 20, highSilence = 25;
+int bassMax = 200000, midMax = 300000, highMax = 250000;
+int noiseFloor = 15;  // Values below this are zeroed
+
+// ═══════════════════════════════════════════════════════════════
+// DMX CONFIG (simple HardwareSerial method - works!)
+// ═══════════════════════════════════════════════════════════════
+HardwareSerial DMX(1);
+#define DMX_TX 17
+#define DMX_EN 4
+#define CHANNELS 100
+#define DMX_PACKET_SIZE 513
+
+uint8_t dmx[DMX_PACKET_SIZE];
+
+inline void driverEnable(bool on) {
+  digitalWrite(DMX_EN, on ? HIGH : LOW);
+}
+
+// ═══════════════════════════════════════════════════════════════
+// SETUP
+// ═══════════════════════════════════════════════════════════════
 void setup() {
-  Serial.begin(SERIAL_BAUD);
+  Serial.begin(115200);
 
-  for (int i = 0; i < 4; i++) {
-    pinMode(LED_PINS[i], OUTPUT);
-    digitalWrite(LED_PINS[i], LOW);
-  }
+  // ADC for mic
+  analogReadResolution(12);
+  analogSetAttenuation(ADC_11db);
 
-  Serial.println("DMX Beat Controller Ready");
-  Serial.println("LEDs: pin2=beat1, pin3=beat2, pin4=beat3, pin5=beat4");
+  // DMX output setup
+  pinMode(DMX_EN, OUTPUT);
+  driverEnable(true);
+  memset(dmx, 0, DMX_PACKET_SIZE);
+  DMX.begin(250000, SERIAL_8N2, -1, DMX_TX);
 }
 
+// ═══════════════════════════════════════════════════════════════
+// CONFIG COMMANDS
+// ═══════════════════════════════════════════════════════════════
+void sendConfig() {
+  Serial.printf("{\"type\":\"config\",\"bassMax\":%d,\"midMax\":%d,\"highMax\":%d,\"bassSilence\":%d,\"midSilence\":%d,\"highSilence\":%d,\"noiseFloor\":%d}\n",
+    bassMax, midMax, highMax, bassSilence, midSilence, highSilence, noiseFloor);
+}
+
+void parseConfig(String cmd) {
+  // Format: CFG:key=value or CFG:GET
+  if (cmd == "CFG:GET") {
+    sendConfig();
+    return;
+  }
+
+  int eqIdx = cmd.indexOf('=');
+  if (eqIdx == -1) return;
+
+  String key = cmd.substring(4, eqIdx);  // Skip "CFG:"
+  int value = cmd.substring(eqIdx + 1).toInt();
+
+  if (key == "bassMax") bassMax = value;
+  else if (key == "midMax") midMax = value;
+  else if (key == "highMax") highMax = value;
+  else if (key == "bassSilence") bassSilence = value;
+  else if (key == "midSilence") midSilence = value;
+  else if (key == "highSilence") highSilence = value;
+  else if (key == "noiseFloor") noiseFloor = value;
+
+  // Acknowledge with current config
+  sendConfig();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DMX OUTPUT (same method that works with lights!)
+// ═══════════════════════════════════════════════════════════════
+void sendDMX() {
+  driverEnable(false);
+  delayMicroseconds(10);
+
+  DMX.end();
+  pinMode(DMX_TX, OUTPUT);
+
+  driverEnable(true);
+
+  // BREAK - 92µs
+  digitalWrite(DMX_TX, LOW);
+  delayMicroseconds(92);
+
+  // MAB - 12µs
+  digitalWrite(DMX_TX, HIGH);
+  delayMicroseconds(12);
+
+  // Send data
+  DMX.begin(250000, SERIAL_8N2, -1, DMX_TX);
+  dmx[0] = 0;  // Start code
+  DMX.write(dmx, DMX_PACKET_SIZE);
+  DMX.flush();
+}
+
+// ═══════════════════════════════════════════════════════════════
+// MAIN LOOP
+// ═══════════════════════════════════════════════════════════════
 void loop() {
-  // Read serial data
-  while (Serial.available() > 0) {
-    char c = Serial.read();
+  // ─────────────────────────────────────────────────────────────
+  // 1. FFT MIC SAMPLING
+  // ─────────────────────────────────────────────────────────────
+  unsigned long t = micros();
+  for (int i = 0; i < SAMPLES; i++) {
+    vReal[i] = analogRead(MIC_PIN) - 2048;
+    vImag[i] = 0;
+    while (micros() - t < 125) {}
+    t += 125;
+  }
 
-    if (c == '\n') {
-      processCommand(inputBuffer);
-      inputBuffer = "";
-    } else if (c != '\r') {
-      inputBuffer += c;
+  // ─────────────────────────────────────────────────────────────
+  // 2. FFT COMPUTE
+  // ─────────────────────────────────────────────────────────────
+  FFT.windowing(FFT_WIN_TYP_HAMMING, FFT_FORWARD);
+  FFT.compute(FFT_FORWARD);
+  FFT.complexToMagnitude();
+
+  // ─────────────────────────────────────────────────────────────
+  // 3. FREQUENCY BAND SUMS
+  // ─────────────────────────────────────────────────────────────
+  float bass = 0, mid = 0, high = 0;
+  for (int i = 3; i < SAMPLES / 2; i++) {
+    if (i <= 25) bass += vReal[i];
+    else if (i <= 80) mid += vReal[i];
+    else if (i <= 160) high += vReal[i];
+  }
+
+  // ─────────────────────────────────────────────────────────────
+  // 4. NORMALIZE TO 0-100
+  // ─────────────────────────────────────────────────────────────
+  int bassLevel = constrain(map(bass, bassSilence * 5000, bassMax, 0, 100), 0, 100);
+  int midLevel = constrain(map(mid, midSilence * 2000, midMax, 0, 100), 0, 100);
+  int highLevel = constrain(map(high, highSilence * 2000, highMax, 0, 100), 0, 100);
+
+  if (bassLevel < noiseFloor) bassLevel = 0;
+  if (midLevel < noiseFloor) midLevel = 0;
+  if (highLevel < noiseFloor) highLevel = 0;
+
+  // ─────────────────────────────────────────────────────────────
+  // 5. SEND AUDIO JSON
+  // ─────────────────────────────────────────────────────────────
+  Serial.printf("{\"bass\":%d,\"mid\":%d,\"high\":%d}\n", bassLevel, midLevel, highLevel);
+
+  // ─────────────────────────────────────────────────────────────
+  // 6. RECEIVE DMX VALUES OR CONFIG FROM WEB
+  // ─────────────────────────────────────────────────────────────
+  while (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+
+    if (line.length() == 0) continue;
+
+    // Skip JSON (our own audio output echoed back)
+    if (line[0] == '{') continue;
+
+    // Config command: CFG:key=value or CFG:GET
+    if (line.startsWith("CFG:")) {
+      parseConfig(line);
+      continue;
     }
-  }
 
-  // Turn off LEDs after flash duration
-  unsigned long now = millis();
-  for (int i = 0; i < 4; i++) {
-    if (ledOn[i] && now >= ledOffTime[i]) {
-      digitalWrite(LED_PINS[i], LOW);
-      ledOn[i] = false;
-    }
-  }
-}
+    // DMX values: ch1,ch2,ch3,...,ch100
+    int commaIndex = 0;
+    for (int ch = 1; ch <= CHANNELS; ch++) {
+      int nextComma = line.indexOf(',', commaIndex);
+      if (nextComma == -1) nextComma = line.length();
 
-void processCommand(String cmd) {
-  if (cmd.length() < 2) return;
+      int value = line.substring(commaIndex, nextComma).toInt();
+      dmx[ch] = constrain(value, 0, 255);
 
-  char type = cmd.charAt(0);
-  String data = cmd.substring(1);
-
-  switch (type) {
-    case 'B':
-      handleBeat(data);
-      break;
-    case 'D':
-      handleDMX(data);
-      break;
-  }
-}
-
-void handleBeat(String data) {
-  int commaIndex = data.indexOf(',');
-  if (commaIndex < 0) return;
-
-  int beatInBar = data.substring(0, commaIndex).toInt();
-  float tempo = data.substring(commaIndex + 1).toFloat();
-
-  // beatInBar is 1-4, array index is 0-3
-  if (beatInBar >= 1 && beatInBar <= 4) {
-    int idx = beatInBar - 1;
-
-    // Turn off all LEDs first
-    for (int i = 0; i < 4; i++) {
-      digitalWrite(LED_PINS[i], LOW);
-      ledOn[i] = false;
+      commaIndex = nextComma + 1;
+      if (commaIndex >= line.length()) break;
     }
 
-    // Turn on the current beat LED
-    digitalWrite(LED_PINS[idx], HIGH);
-    ledOn[idx] = true;
-    ledOffTime[idx] = millis() + FLASH_DURATION;
+    // Debug: print first 10 channels received
+    Serial.printf("{\"debug\":\"DMX RX\",\"ch1\":%d,\"ch2\":%d,\"ch3\":%d,\"ch4\":%d,\"ch5\":%d,\"ch6\":%d,\"ch7\":%d,\"ch8\":%d,\"ch9\":%d,\"ch10\":%d}\n",
+      dmx[1], dmx[2], dmx[3], dmx[4], dmx[5], dmx[6], dmx[7], dmx[8], dmx[9], dmx[10]);
   }
 
-  Serial.print("BEAT ");
-  Serial.print(beatInBar);
-  Serial.print("/4 @ ");
-  Serial.print(tempo, 1);
-  Serial.println(" BPM");
-}
-
-void handleDMX(String data) {
-  int commaIndex = data.indexOf(',');
-  if (commaIndex < 0) return;
-
-  int channel = data.substring(0, commaIndex).toInt();
-  int value = data.substring(commaIndex + 1).toInt();
-
-  Serial.print("DMX CH");
-  Serial.print(channel);
-  Serial.print(" = ");
-  Serial.println(value);
+  // ─────────────────────────────────────────────────────────────
+  // 7. OUTPUT DMX
+  // ─────────────────────────────────────────────────────────────
+  sendDMX();
 }

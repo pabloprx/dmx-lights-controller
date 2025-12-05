@@ -71,7 +71,7 @@ export function useBankPlayer() {
         sendDMX(dmxValues.slice(0, 16))
       } else if (serialConnected.value) {
         // No scene - send blackout
-        sendDMX(new Array(16).fill(0))
+        sendDMX(new Array(100).fill(0))
       }
     }
   }
@@ -136,7 +136,7 @@ export function useBankPlayer() {
       const dmxValues = getSceneDMX(scene.id)
       sendDMX(dmxValues.slice(0, 16))
     } else {
-      sendDMX(new Array(16).fill(0))
+      sendDMX(new Array(100).fill(0))
     }
   }
 

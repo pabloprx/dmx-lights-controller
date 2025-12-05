@@ -107,10 +107,10 @@ function setStrobeSpeed(speed: StrobeSpeed | null) {
 // Live preview when editing preset
 watch(newPresetValues, () => {
   if (showAddPreset.value && store.selectedDevice.value) {
-    const dmx = new Array(16).fill(0)
+    const dmx = new Array(100).fill(0)
     const channels = valuesToDMX(newPresetValues.value)
     const start = store.selectedDevice.value.startChannel - 1
-    for (let i = 0; i < channels.length && start + i < 16; i++) {
+    for (let i = 0; i < channels.length && start + i < 100; i++) {
       dmx[start + i] = channels[i]
     }
     store.sendDMX(dmx)
@@ -147,13 +147,22 @@ function handlePresetClick(presetId: string) {
 function sendLaserChannels() {
   if (!store.selectedDevice.value) return
 
-  const dmx = new Array(16).fill(0)
+  const dmx = new Array(100).fill(0)
   const start = store.selectedDevice.value.startChannel - 1
 
-  for (let i = 0; i < laserChannels.value.length && start + i < 16; i++) {
-    dmx[start + i] = laserChannels.value[i]
+  // Pad to 16 channels minimum (some fixtures expect this)
+  const paddedChannels = [...laserChannels.value]
+  while (paddedChannels.length < 16) {
+    paddedChannels.push(0)
   }
 
+  console.log('[RightPanel] sendLaserChannels - device:', store.selectedDevice.value.name, 'ch', store.selectedDevice.value.startChannel, 'values:', paddedChannels)
+
+  for (let i = 0; i < paddedChannels.length && start + i < 100; i++) {
+    dmx[start + i] = paddedChannels[i]
+  }
+
+  console.log('[RightPanel] Sending DMX channels', start + 1, 'to', start + paddedChannels.length, ':', dmx.slice(start, start + paddedChannels.length))
   store.sendDMX(dmx)
 }
 

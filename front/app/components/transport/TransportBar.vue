@@ -2,7 +2,17 @@
 import type { AudioBand } from '~/composables/useAudioReactive'
 
 const { state: linkState, connected, connect: connectLink, disconnect: disconnectLink } = useAbletonLink()
-const { isConnected: serialConnected, connect: connectSerial, audioLevels } = useUnifiedSerial()
+const {
+  isConnected: serialConnected,
+  connect: connectSerial,
+  audioLevels,
+  audioConfig,
+  sendConfigValue,
+  syncConfigToArduino,
+  resetConfig,
+  DEFAULT_CONFIG,
+} = useUnifiedSerial()
+import type { AudioConfig } from '~/composables/useUnifiedSerial'
 const {
   mode,
   isTestingMode,
@@ -18,10 +28,69 @@ const {
   setInternalTempo,
   stepBeat,
 } = useAppMode()
-const { isPlaying, play, stop, audioReactive } = useSetPlayer()
+const {
+  isPlaying, play, stop, audioReactive,
+  masterDimmer, setMasterDimmer,
+  dimmerChannels, addDimmerChannel, removeDimmerChannel, clearDimmerChannels
+} = useSetPlayer()
+import type { DimmerChannelConfig } from '~/composables/useSetPlayer'
 
 // Confirmation for exiting performance mode
 const showExitConfirm = ref(false)
+
+// Audio config modal
+const showAudioConfig = ref(false)
+const localConfig = ref<AudioConfig>({ ...DEFAULT_CONFIG })
+
+function openAudioConfig() {
+  localConfig.value = { ...audioConfig.value }
+  showAudioConfig.value = true
+}
+
+function applyAudioConfig() {
+  // Send all changed values to Arduino
+  for (const key of Object.keys(localConfig.value) as (keyof AudioConfig)[]) {
+    if (localConfig.value[key] !== audioConfig.value[key]) {
+      sendConfigValue(key, localConfig.value[key])
+    }
+  }
+  showAudioConfig.value = false
+}
+
+function handleResetConfig() {
+  localConfig.value = { ...DEFAULT_CONFIG }
+  resetConfig()
+  showAudioConfig.value = false
+}
+
+// ═══════════════════════════════════════════════════════════════
+// DIMMER CONFIG MODAL
+// ═══════════════════════════════════════════════════════════════
+const showDimmerConfig = ref(false)
+const newDimmerChannel = ref(1)
+const newDimmerMin = ref(0)
+const newDimmerMax = ref(134)
+
+function openDimmerConfig() {
+  showDimmerConfig.value = true
+}
+
+function addNewDimmerChannel() {
+  if (newDimmerChannel.value < 1 || newDimmerChannel.value > 100) return
+  addDimmerChannel({
+    channel: newDimmerChannel.value,
+    min: newDimmerMin.value,
+    max: newDimmerMax.value
+  })
+  // Reset for next entry
+  newDimmerChannel.value = 1
+  newDimmerMin.value = 0
+  newDimmerMax.value = 134
+}
+
+function handleRemoveDimmerChannel(channel: number) {
+  removeDimmerChannel(channel)
+}
 
 // Cycle through audio bands
 const bands: AudioBand[] = ['bass', 'mid', 'high']
@@ -212,6 +281,15 @@ function confirmExitPerformance() {
         :class="serialConnected ? 'bg-green-500 shadow-[0_0_6px_#22c55e]' : 'bg-zinc-600'"
         :title="serialConnected ? 'Serial connected' : 'Not connected'"
       />
+      <!-- Audio Config Button -->
+      <button
+        v-if="serialConnected"
+        class="ml-1 w-5 h-5 flex items-center justify-center rounded text-[10px] text-zinc-400 hover:text-white hover:bg-zinc-700 transition-colors"
+        title="Audio thresholds config"
+        @click="openAudioConfig"
+      >
+        ⚙
+      </button>
     </div>
 
     <!-- Audio Reactive Toggle -->
@@ -247,6 +325,32 @@ function confirmExitPerformance() {
       >
         {{ currentSensitivityLabel }}
       </button>
+    </div>
+
+    <!-- Master Dimmer -->
+    <div class="master-dimmer">
+      <button
+        class="text-[10px] text-zinc-500 uppercase font-semibold hover:text-amber-400 transition-colors"
+        title="Configure dimmer channels"
+        @click="openDimmerConfig"
+      >
+        Dim
+        <span v-if="dimmerChannels.length > 0" class="text-amber-400">({{ dimmerChannels.length }})</span>
+      </button>
+      <input
+        type="range"
+        :value="masterDimmer"
+        min="0"
+        max="100"
+        class="dimmer-slider"
+        :disabled="dimmerChannels.length === 0"
+        :title="dimmerChannels.length === 0 ? 'Click Dim to configure channels' : ''"
+        @input="(e) => setMasterDimmer(Number((e.target as HTMLInputElement).value))"
+      />
+      <span
+        class="text-xs font-mono w-8 text-right"
+        :class="masterDimmer < 100 && dimmerChannels.length > 0 ? 'text-amber-400' : 'text-zinc-500'"
+      >{{ masterDimmer }}%</span>
     </div>
 
     <div class="flex-1" />
@@ -349,6 +453,249 @@ function confirmExitPerformance() {
           </div>
         </div>
       </div>
+
+      <!-- Audio Config Modal -->
+      <div
+        v-if="showAudioConfig"
+        class="fixed inset-0 bg-black/70 flex items-center justify-center z-50"
+        @click.self="showAudioConfig = false"
+      >
+        <div class="bg-neutral-800 rounded-lg p-6 w-[420px] max-h-[80vh] overflow-y-auto">
+          <h3 class="text-lg font-bold text-white mb-4">Audio Thresholds Config</h3>
+          <p class="text-neutral-500 text-xs mb-4">Adjust FFT mapping thresholds. Changes are sent to Arduino in real-time.</p>
+
+          <!-- Bass Section -->
+          <div class="config-section">
+            <div class="config-section-title text-red-400">Bass</div>
+            <div class="config-row">
+              <label>Silence</label>
+              <input
+                v-model.number="localConfig.bassSilence"
+                type="range"
+                min="0"
+                max="100"
+                class="config-slider"
+              >
+              <span class="config-value">{{ localConfig.bassSilence }}</span>
+            </div>
+            <div class="config-row">
+              <label>Max</label>
+              <input
+                v-model.number="localConfig.bassMax"
+                type="range"
+                min="50000"
+                max="500000"
+                step="10000"
+                class="config-slider"
+              >
+              <span class="config-value">{{ (localConfig.bassMax / 1000).toFixed(0) }}k</span>
+            </div>
+          </div>
+
+          <!-- Mid Section -->
+          <div class="config-section">
+            <div class="config-section-title text-green-400">Mid</div>
+            <div class="config-row">
+              <label>Silence</label>
+              <input
+                v-model.number="localConfig.midSilence"
+                type="range"
+                min="0"
+                max="100"
+                class="config-slider"
+              >
+              <span class="config-value">{{ localConfig.midSilence }}</span>
+            </div>
+            <div class="config-row">
+              <label>Max</label>
+              <input
+                v-model.number="localConfig.midMax"
+                type="range"
+                min="50000"
+                max="500000"
+                step="10000"
+                class="config-slider"
+              >
+              <span class="config-value">{{ (localConfig.midMax / 1000).toFixed(0) }}k</span>
+            </div>
+          </div>
+
+          <!-- High Section -->
+          <div class="config-section">
+            <div class="config-section-title text-blue-400">High</div>
+            <div class="config-row">
+              <label>Silence</label>
+              <input
+                v-model.number="localConfig.highSilence"
+                type="range"
+                min="0"
+                max="100"
+                class="config-slider"
+              >
+              <span class="config-value">{{ localConfig.highSilence }}</span>
+            </div>
+            <div class="config-row">
+              <label>Max</label>
+              <input
+                v-model.number="localConfig.highMax"
+                type="range"
+                min="50000"
+                max="500000"
+                step="10000"
+                class="config-slider"
+              >
+              <span class="config-value">{{ (localConfig.highMax / 1000).toFixed(0) }}k</span>
+            </div>
+          </div>
+
+          <!-- Noise Floor -->
+          <div class="config-section">
+            <div class="config-section-title text-amber-400">General</div>
+            <div class="config-row">
+              <label>Noise Floor</label>
+              <input
+                v-model.number="localConfig.noiseFloor"
+                type="range"
+                min="0"
+                max="30"
+                class="config-slider"
+              >
+              <span class="config-value">{{ localConfig.noiseFloor }}</span>
+            </div>
+          </div>
+
+          <!-- Actions -->
+          <div class="flex gap-3 mt-6 justify-between">
+            <button
+              class="px-3 py-2 rounded bg-neutral-700 text-neutral-400 hover:bg-neutral-600 hover:text-white text-sm"
+              @click="handleResetConfig"
+            >
+              Reset Defaults
+            </button>
+            <div class="flex gap-2">
+              <button
+                class="px-4 py-2 rounded bg-neutral-700 text-white hover:bg-neutral-600"
+                @click="showAudioConfig = false"
+              >
+                Cancel
+              </button>
+              <button
+                class="px-4 py-2 rounded bg-green-600 text-white hover:bg-green-500"
+                @click="applyAudioConfig"
+              >
+                Apply
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Dimmer Config Modal -->
+    <Teleport to="body">
+      <div
+        v-if="showDimmerConfig"
+        class="config-overlay"
+        @click.self="showDimmerConfig = false"
+      >
+        <div class="config-modal" style="max-width: 500px;">
+          <div class="config-header">
+            <h3>Dimmer Channel Configuration</h3>
+            <button class="config-close" @click="showDimmerConfig = false">×</button>
+          </div>
+
+          <div class="config-body">
+            <p class="text-xs text-zinc-400 mb-4">
+              Configure which DMX channels the master dimmer controls and their value ranges.
+            </p>
+
+            <!-- Current Channels List -->
+            <div v-if="dimmerChannels.length > 0" class="mb-4">
+              <div class="text-xs text-zinc-500 uppercase mb-2">Configured Channels</div>
+              <div class="space-y-2">
+                <div
+                  v-for="config in dimmerChannels"
+                  :key="config.channel"
+                  class="flex items-center gap-3 p-2 bg-zinc-800 rounded"
+                >
+                  <span class="text-sm font-mono text-amber-400 w-16">CH {{ config.channel }}</span>
+                  <span class="text-xs text-zinc-400">Range:</span>
+                  <span class="text-sm font-mono">{{ config.min }} - {{ config.max }}</span>
+                  <button
+                    class="ml-auto text-red-400 hover:text-red-300 text-sm px-2"
+                    @click="handleRemoveDimmerChannel(config.channel)"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Add New Channel -->
+            <div class="border border-zinc-700 rounded p-3">
+              <div class="text-xs text-zinc-500 uppercase mb-3">Add Channel</div>
+              <div class="flex items-center gap-3">
+                <div class="flex flex-col gap-1">
+                  <label class="text-[10px] text-zinc-500">Channel</label>
+                  <input
+                    v-model.number="newDimmerChannel"
+                    type="number"
+                    min="1"
+                    max="100"
+                    class="w-16 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-sm font-mono text-center"
+                  />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="text-[10px] text-zinc-500">Min</label>
+                  <input
+                    v-model.number="newDimmerMin"
+                    type="number"
+                    min="0"
+                    max="255"
+                    class="w-16 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-sm font-mono text-center"
+                  />
+                </div>
+                <div class="flex flex-col gap-1">
+                  <label class="text-[10px] text-zinc-500">Max</label>
+                  <input
+                    v-model.number="newDimmerMax"
+                    type="number"
+                    min="0"
+                    max="255"
+                    class="w-16 px-2 py-1 bg-zinc-800 border border-zinc-600 rounded text-sm font-mono text-center"
+                  />
+                </div>
+                <button
+                  class="mt-4 px-3 py-1 bg-green-600 hover:bg-green-500 text-white rounded text-sm"
+                  @click="addNewDimmerChannel"
+                >
+                  Add
+                </button>
+              </div>
+              <p class="text-[10px] text-zinc-500 mt-2">
+                Tip: PinSpot dimmer range is 0-134. Use CH 1 for PinSpot 1, CH 9 for PinSpot 2, etc.
+              </p>
+            </div>
+          </div>
+
+          <div class="config-footer">
+            <button
+              v-if="dimmerChannels.length > 0"
+              class="px-3 py-1.5 rounded bg-red-600/20 text-red-400 hover:bg-red-600/30 text-sm"
+              @click="clearDimmerChannels"
+            >
+              Clear All
+            </button>
+            <div class="flex-1" />
+            <button
+              class="px-4 py-2 rounded bg-neutral-700 text-white hover:bg-neutral-600"
+              @click="showDimmerConfig = false"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      </div>
     </Teleport>
   </div>
 </template>
@@ -431,5 +778,142 @@ function confirmExitPerformance() {
 
 .beat-indicator:hover .link-debug-tooltip {
   opacity: 1;
+}
+
+/* Audio Config Modal */
+.config-section {
+  margin-bottom: 16px;
+  padding: 12px;
+  background: #1a1b21;
+  border-radius: 8px;
+  border: 1px solid #383944;
+}
+
+.config-section-title {
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 10px;
+}
+
+.config-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.config-row:last-child {
+  margin-bottom: 0;
+}
+
+.config-row label {
+  font-size: 11px;
+  color: #888;
+  width: 60px;
+  flex-shrink: 0;
+}
+
+.config-slider {
+  flex: 1;
+  height: 6px;
+  cursor: pointer;
+  accent-color: #22c55e;
+}
+
+.config-value {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #aaa;
+  min-width: 40px;
+  text-align: right;
+}
+
+/* Master Dimmer */
+.master-dimmer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: #22232b;
+  border: 1px solid #383944;
+  border-radius: 6px;
+}
+
+.dimmer-slider {
+  width: 80px;
+  height: 6px;
+  cursor: pointer;
+  accent-color: #f59e0b;
+}
+
+.dimmer-slider:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* Dimmer Config Modal */
+.config-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.config-modal {
+  background: #27272a;
+  border-radius: 12px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5);
+  width: 100%;
+  max-height: 80vh;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.config-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid #383944;
+}
+
+.config-header h3 {
+  font-size: 16px;
+  font-weight: 600;
+  color: white;
+  margin: 0;
+}
+
+.config-close {
+  background: none;
+  border: none;
+  color: #888;
+  font-size: 24px;
+  cursor: pointer;
+  padding: 0;
+  line-height: 1;
+}
+
+.config-close:hover {
+  color: white;
+}
+
+.config-body {
+  padding: 20px;
+  overflow-y: auto;
+}
+
+.config-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid #383944;
 }
 </style>
