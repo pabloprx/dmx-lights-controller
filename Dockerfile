@@ -1,22 +1,14 @@
 # DMX Lights Controller - Docker Setup
 FROM node:20-bookworm-slim
 
-# Install build dependencies for native modules (abletonlink requires C++ toolchain)
-RUN apt-get update && apt-get install -y \
-    python3 \
-    make \
-    g++ \
-    libasound2-dev \
-    git \
-    && rm -rf /var/lib/apt/lists/*
-
 WORKDIR /app
 
 # Copy package files first (better layer caching)
 COPY front/package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install dependencies (skip optional native modules - abletonlink has a bug on Linux)
+# See: https://github.com/Ableton/link - requires LINK_PLATFORM_LINUX=1 but npm package doesn't set it
+RUN npm install --omit=optional
 
 # Copy the rest of the frontend code
 COPY front/ ./
