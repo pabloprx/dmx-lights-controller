@@ -1,8 +1,22 @@
-import { AbletonLink } from "@ktamas77/abletonlink";
 import { linkStore, updateLinkState } from "../utils/linkState";
 import { startBeatLoop, stopBeatLoop } from "../utils/beatLoop";
 
+// Try to load abletonlink - it's optional (won't build on Linux/Docker)
+let AbletonLink: any = null;
+try {
+  AbletonLink = require("@ktamas77/abletonlink").AbletonLink;
+} catch (e) {
+  console.log("[AbletonLink] Native module not available - running without Link sync");
+}
+
 export default defineNitroPlugin((nitroApp) => {
+  // If abletonlink isn't available, just start the beat loop with internal timing
+  if (!AbletonLink) {
+    console.log("[AbletonLink] Running in standalone mode (no Link sync)");
+    startBeatLoop();
+    return;
+  }
+
   console.log("[AbletonLink] Initializing...");
 
   // Create Link instance with default 120 BPM

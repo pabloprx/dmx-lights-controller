@@ -1,4 +1,17 @@
-import type { AbletonLink } from "@ktamas77/abletonlink";
+// AbletonLink instance type (optional - may not be available on all platforms)
+interface AbletonLinkInstance {
+  enable(enabled: boolean): void;
+  enableStartStopSync(enabled: boolean): void;
+  getTempo(): number;
+  setTempo(tempo: number): void;
+  getNumPeers(): number;
+  getBeat(): number;
+  getPhase(): number;
+  isPlaying(): boolean;
+  setNumPeersCallback(cb: (numPeers: number) => void): void;
+  setTempoCallback(cb: (tempo: number) => void): void;
+  setStartStopCallback(cb: (isPlaying: boolean) => void): void;
+}
 
 export interface LinkState {
   enabled: boolean;
@@ -14,7 +27,7 @@ export interface LinkState {
 }
 
 export interface LinkStore {
-  instance: AbletonLink | null;
+  instance: AbletonLinkInstance | null;
   state: LinkState;
   subscribers: Set<(state: LinkState) => void>;
 }
@@ -58,6 +71,6 @@ export function getLinkState(): LinkState {
   return { ...linkStore.state };
 }
 
-export function getLinkInstance(): AbletonLink | null {
+export function getLinkInstance(): AbletonLinkInstance | null {
   return linkStore.instance;
 }

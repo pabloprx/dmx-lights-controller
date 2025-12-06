@@ -3,12 +3,12 @@ FROM node:20-bookworm-slim
 
 WORKDIR /app
 
-# Copy package files first (better layer caching)
-COPY front/package*.json ./
+# Copy only package.json (not lock file - avoids platform-specific optional dep issues)
+COPY front/package.json ./
 
-# Install dependencies
-# abletonlink is in optionalDependencies - it will fail to build on Linux but npm should continue
-RUN npm install
+# Install dependencies without optional (abletonlink native module doesn't build on Linux)
+# The server plugin gracefully handles missing abletonlink
+RUN npm install --omit=optional
 
 # Copy the rest of the frontend code
 COPY front/ ./
