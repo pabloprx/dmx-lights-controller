@@ -6,9 +6,9 @@ WORKDIR /app
 # Copy package files first (better layer caching)
 COPY front/package*.json ./
 
-# Install dependencies (skip optional native modules - abletonlink has a bug on Linux)
-# See: https://github.com/Ableton/link - requires LINK_PLATFORM_LINUX=1 but npm package doesn't set it
-RUN npm install --omit=optional
+# Install dependencies
+# abletonlink is in optionalDependencies - it will fail to build on Linux but npm should continue
+RUN npm install
 
 # Copy the rest of the frontend code
 COPY front/ ./
