@@ -1,12 +1,13 @@
 # DMX Lights Controller - Docker Setup
-FROM node:23-bookworm-slim
+FROM node:20-bookworm-slim
 
-# Install build dependencies for native modules (abletonlink)
+# Install build dependencies for native modules (abletonlink requires C++ toolchain)
 RUN apt-get update && apt-get install -y \
     python3 \
     make \
     g++ \
     libasound2-dev \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
