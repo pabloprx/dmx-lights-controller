@@ -90,7 +90,7 @@ watch([() => props.open, () => props.preset], ([isOpen]) => {
   if (!isOpen) return
 
   // Capture original DMX state for discard
-  originalDMX.value = new Array(16).fill(0)
+  originalDMX.value = new Array(100).fill(0)
 
   if (props.preset) {
     // Editing existing preset
@@ -144,16 +144,16 @@ const previewColor = computed(() => {
 watch([rgbwValues, channelValues], () => {
   if (!props.open || !device.value) return
 
-  const dmxArray = new Array(16).fill(0)
+  const dmxArray = new Array(100).fill(0)
   const start = device.value.startChannel - 1
 
   if (controlType.value === 'rgbw') {
     const channels = valuesToDMX(rgbwValues.value)
-    for (let i = 0; i < channels.length && start + i < 16; i++) {
+    for (let i = 0; i < channels.length && start + i < 100; i++) {
       dmxArray[start + i] = channels[i]
     }
   } else {
-    for (let i = 0; i < channelValues.value.length && start + i < 16; i++) {
+    for (let i = 0; i < channelValues.value.length && start + i < 100; i++) {
       dmxArray[start + i] = channelValues.value[i]
     }
   }
