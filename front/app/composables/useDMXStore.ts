@@ -30,6 +30,11 @@ const selectedSceneId = ref<string | null>(null)
 const selectedSetId = ref<string | null>(null)
 const activeSetId = ref<string | null>(null) // Set currently playing
 
+// Palette state (for painting clips)
+const activeBrushId = ref<string | null>(null) // Currently selected preset for painting
+const recentPresets = ref<string[]>([]) // Last 8 used presets
+const toolMode = ref<'paint' | 'erase'>('paint') // Current tool mode
+
 // Current DMX state tracking (for additive presets like dimmer)
 // Stores RAW values before master dimmer scaling
 const currentDMXState = ref<number[]>(new Array(100).fill(0))
@@ -253,6 +258,45 @@ export function useDMXStore() {
 
   function getPresetsForProfile(profileId: string): Preset[] {
     return presets.value.filter(p => p.profileId === profileId)
+  }
+
+  // ═══════════════════════════════════════════════════════════════
+  // PALETTE / BRUSH (for painting clips)
+  // ═══════════════════════════════════════════════════════════════
+
+  // Active brush is the preset used when painting clips
+  const activeBrush = computed(() =>
+    activeBrushId.value ? getPreset(activeBrushId.value) : null
+  )
+
+  function setActiveBrush(presetId: string | null) {
+    activeBrushId.value = presetId
+
+    if (presetId) {
+      // Add to recent presets (no duplicates, max 8)
+      recentPresets.value = [
+        presetId,
+        ...recentPresets.value.filter(id => id !== presetId)
+      ].slice(0, 8)
+
+      // Live preview: apply to selected device or group
+      if (selectedDeviceId.value) {
+        applyPresetToDevice(presetId, selectedDeviceId.value)
+      } else if (selectedGroupId.value) {
+        const group = getGroup(selectedGroupId.value)
+        if (group) {
+          applyPresetToDevices(presetId, group.deviceIds)
+        }
+      }
+    }
+  }
+
+  function setToolMode(mode: 'paint' | 'erase') {
+    toolMode.value = mode
+  }
+
+  function toggleToolMode() {
+    toolMode.value = toolMode.value === 'paint' ? 'erase' : 'paint'
   }
 
   // ═══════════════════════════════════════════════════════════════
@@ -726,6 +770,12 @@ export function useDMXStore() {
     selectedSetId,
     activeSetId,
 
+    // Palette state
+    activeBrushId,
+    activeBrush,
+    recentPresets,
+    toolMode,
+
     // Computed
     selectedDevice,
     selectedGroup,
@@ -759,6 +809,11 @@ export function useDMXStore() {
     selectPreset,
     getPreset,
     getPresetsForProfile,
+
+    // Palette methods
+    setActiveBrush,
+    setToolMode,
+    toggleToolMode,
 
     // Scene methods
     addScene,
