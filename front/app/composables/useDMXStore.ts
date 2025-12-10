@@ -30,6 +30,11 @@ const selectedSceneId = ref<string | null>(null)
 const selectedSetId = ref<string | null>(null)
 const activeSetId = ref<string | null>(null) // Set currently playing
 
+// Combined preset selection (color + effect)
+// Color presets can combine with strobe/dimmer, but strobe and dimmer are mutually exclusive
+const selectedColorPresetId = ref<string | null>(null)
+const selectedEffectPresetId = ref<string | null>(null) // strobe OR dimmer
+
 // Palette state (for painting clips)
 const activeBrushId = ref<string | null>(null) // Currently selected preset for painting
 const recentPresets = ref<string[]>([]) // Last 8 used presets
@@ -254,6 +259,116 @@ export function useDMXStore() {
 
   function getPreset(id: string): Preset | null {
     return presets.value.find(p => p.id === id) || null
+  }
+
+  // Combined preset selection with smart merging
+  // Color + Strobe can combine, but Strobe and Dimmer are mutually exclusive
+  function selectColorPreset(presetId: string | null) {
+    // Toggle off if clicking the same one
+    if (selectedColorPresetId.value === presetId) {
+      selectedColorPresetId.value = null
+    } else {
+      selectedColorPresetId.value = presetId
+    }
+    applyCombinedPreset()
+  }
+
+  function selectEffectPreset(presetId: string | null) {
+    // Toggle off if clicking the same one
+    if (selectedEffectPresetId.value === presetId) {
+      selectedEffectPresetId.value = null
+    } else {
+      selectedEffectPresetId.value = presetId
+    }
+    applyCombinedPreset()
+  }
+
+  // Get combined preset values from color + effect selections
+  function getCombinedPresetValues(): PresetValues | null {
+    const colorPreset = selectedColorPresetId.value ? getPreset(selectedColorPresetId.value) : null
+    const effectPreset = selectedEffectPresetId.value ? getPreset(selectedEffectPresetId.value) : null
+
+    if (!colorPreset && !effectPreset) return null
+
+    // Start with defaults
+    const combined: PresetValues = {
+      dimmer: 255,
+      strobe: false,
+      strobeSpeed: 'medium',
+      red: 0,
+      green: 0,
+      blue: 0,
+      white: 0
+    }
+
+    // Apply color values
+    if (colorPreset?.values) {
+      combined.red = colorPreset.values.red
+      combined.green = colorPreset.values.green
+      combined.blue = colorPreset.values.blue
+      combined.white = colorPreset.values.white
+      combined.dimmer = colorPreset.values.dimmer
+    }
+
+    // Apply effect (strobe or dimmer) - overrides dimmer settings
+    if (effectPreset?.values) {
+      combined.dimmer = effectPreset.values.dimmer
+      combined.strobe = effectPreset.values.strobe
+      combined.strobeSpeed = effectPreset.values.strobeSpeed
+    }
+
+    return combined
+  }
+
+  // Apply combined color + effect preset to selected device/group
+  function applyCombinedPreset() {
+    const values = getCombinedPresetValues()
+    if (!values) return
+
+    // Apply to selected device or group
+    if (selectedDeviceId.value) {
+      const device = getDevice(selectedDeviceId.value)
+      if (device) {
+        applyCombinedValuesToDevice(values, device)
+      }
+    } else if (selectedGroupId.value) {
+      const group = getGroup(selectedGroupId.value)
+      if (group) {
+        for (const deviceId of group.deviceIds) {
+          const device = getDevice(deviceId)
+          if (device) {
+            applyCombinedValuesToDevice(values, device)
+          }
+        }
+      }
+    }
+  }
+
+  // Helper to apply combined values to a device
+  function applyCombinedValuesToDevice(values: PresetValues, device: Device) {
+    const profile = getProfileById(device.profileId)
+    if (!profile || profile.controlType !== 'rgbw') return
+
+    const dmx = new Array(100).fill(0)
+    const start = device.startChannel - 1
+
+    // Apply to pinspot-rgbw-5ch profile
+    // CH1: Dimmer/Strobe
+    if (values.strobe) {
+      const strobeValues = { slow: 135, medium: 175, fast: 215 }
+      dmx[start + 0] = strobeValues[values.strobeSpeed]
+    } else {
+      // Map dimmer 0-255 to 9-134 range
+      dmx[start + 0] = Math.round(9 + (values.dimmer / 255) * (134 - 9))
+    }
+
+    // CH2-5: RGBW
+    dmx[start + 1] = values.red
+    dmx[start + 2] = values.green
+    dmx[start + 3] = values.blue
+    dmx[start + 4] = values.white
+
+    sendDMX(dmx)
   }
 
   function getPresetsForProfile(profileId: string): Preset[] {
@@ -809,6 +924,13 @@ export function useDMXStore() {
     selectPreset,
     getPreset,
     getPresetsForProfile,
+
+    // Combined preset selection (color + effect)
+    selectedColorPresetId,
+    selectedEffectPresetId,
+    selectColorPreset,
+    selectEffectPreset,
+    getCombinedPresetValues,
 
     // Palette methods
     setActiveBrush,

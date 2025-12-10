@@ -2,14 +2,13 @@
 import { useDMXStore } from '~/composables/useDMXStore'
 import { useSetPlayer } from '~/composables/useSetPlayer'
 import { useClipDrag } from '~/composables/useClipDrag'
-import { TRACK_COLORS, getPresetDisplayColor, getProfileById } from '~/types/dmx'
+import { getPresetDisplayColor } from '~/types/dmx'
 import type { SetClip, Preset } from '~/types/dmx'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import PresetEditorModal from '~/components/presets/PresetEditorModal.vue'
-import PresetPalette from '~/components/sets/PresetPalette.vue'
 
 const store = useDMXStore()
 const player = useSetPlayer()
@@ -106,6 +105,19 @@ function getTrackTargetDeviceId(trackId: string): string | null {
   }
 }
 
+// Handle track header click - select the track's device/group to show presets
+function handleTrackHeaderClick(trackId: string) {
+  if (!currentSet.value) return
+  const track = currentSet.value.tracks.find(t => t.id === trackId)
+  if (!track) return
+
+  if (track.targetType === 'device') {
+    store.selectDevice(track.targetId)
+  } else {
+    store.selectGroup(track.targetId)
+  }
+}
+
 function openPresetEditor(trackId: string | null, beat: number, existingPreset: Preset | null = null) {
   let deviceId: string | null = null
 
@@ -151,12 +163,6 @@ function handlePresetDiscard() {
   showPresetEditor.value = false
 }
 
-// Get clips for a track
-function getTrackClips(trackId: string) {
-  if (!currentSet.value) return []
-  return currentSet.value.clips.filter(c => c.trackId === trackId)
-}
-
 // Get preset color for clip display
 function getClipColor(presetId: string): string {
   const preset = store.getPreset(presetId)
@@ -164,6 +170,27 @@ function getClipColor(presetId: string): string {
 
   // Use the new helper that handles both RGBW and slider profiles
   return getPresetDisplayColor(preset)
+}
+
+// Get strobe/dimmer indicators for a clip
+function getClipIndicators(presetId: string): { strobe?: string; dimmer?: string } {
+  const preset = store.getPreset(presetId)
+  if (!preset?.values) return {}
+
+  const indicators: { strobe?: string; dimmer?: string } = {}
+
+  if (preset.values.strobe) {
+    const speedLabel = { slow: 'S', medium: 'M', fast: 'F' }
+    indicators.strobe = speedLabel[preset.values.strobeSpeed] || 'S'
+  }
+
+  // Show dimmer if not full (255)
+  if (!preset.values.strobe && preset.values.dimmer < 255) {
+    const percent = Math.round((preset.values.dimmer / 255) * 100)
+    indicators.dimmer = `${percent}%`
+  }
+
+  return indicators
 }
 
 // Handle cell click (paint/erase based on tool mode)
@@ -361,9 +388,6 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
       </div>
     </div>
 
-    <!-- Preset Palette -->
-    <PresetPalette @open-preset-editor="openPresetEditor(null, player.beatInSet.value)" />
-
     <!-- Timeline Grid -->
     <div v-if="currentSet" class="timeline-container">
       <!-- Beat Ruler -->
@@ -387,7 +411,11 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
           class="track-row"
         >
           <!-- Track Header -->
-          <div class="track-header" :style="{ borderLeftColor: track.color }">
+          <div
+            class="track-header"
+            :style="{ borderLeftColor: track.color }"
+            @click="handleTrackHeaderClick(track.id)"
+          >
             <span class="track-name">{{ track.name }}</span>
             <div class="track-controls">
               <button
@@ -438,6 +466,15 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
                 <span class="clip-name">
                   {{ store.getPreset(getClipAtBeat(track.id, beat)!.presetId)?.name }}
                 </span>
+                <!-- Strobe/Dimmer indicators -->
+                <div class="clip-indicators">
+                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe" class="clip-indicator strobe">
+                    ⚡{{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe }}
+                  </span>
+                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).dimmer" class="clip-indicator dimmer">
+                    {{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).dimmer }}
+                  </span>
+                </div>
                 <!-- Resize handles -->
                 <div class="resize-handle resize-handle-start" />
                 <div class="resize-handle resize-handle-end" />
@@ -853,7 +890,7 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
 .track-row {
   display: flex;
   border-bottom: 1px solid #2a2b36;
-  min-height: 52px;
+  min-height: 60px;
 }
 
 /* Zebra striping for track rows */
@@ -875,6 +912,12 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   background: #22232b;
   border-right: 1px solid #383944;
   border-left: 4px solid;
+  cursor: pointer;
+  transition: background 0.15s ease;
+}
+
+.track-header:hover {
+  background: #2a2b35;
 }
 
 .track-name {
@@ -963,13 +1006,14 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
 /* Clips - GLOWING LIGHT BLOCKS */
 .clip {
   position: absolute;
-  top: 4px;
+  top: 3px;
   left: 2px;
-  bottom: 4px;
-  border-radius: 4px;
+  bottom: 3px;
+  border-radius: 6px;
   display: flex;
-  align-items: center;
-  padding: 0 6px;
+  flex-direction: column;
+  justify-content: center;
+  padding: 4px 8px;
   overflow: hidden;
   z-index: 5;
   transition: transform 0.05s ease, box-shadow 0.15s ease;
@@ -977,6 +1021,7 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   /* Gradient overlay for depth */
   background-image: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 50%, rgba(0,0,0,0.2) 100%);
   background-blend-mode: overlay;
+  min-height: 44px;
 }
 
 .clip:hover {
@@ -995,7 +1040,7 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
 }
 
 .clip-name {
-  font-size: 9px;
+  font-size: 10px;
   font-weight: 700;
   color: white;
   text-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
@@ -1005,6 +1050,37 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   pointer-events: none;
   text-transform: uppercase;
   letter-spacing: 0.02em;
+  line-height: 1.2;
+}
+
+/* Clip indicators (strobe/dimmer) */
+.clip-indicators {
+  display: flex;
+  gap: 4px;
+  margin-top: 2px;
+  pointer-events: none;
+}
+
+.clip-indicator {
+  font-size: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(4px);
+}
+
+.clip-indicator.strobe {
+  color: #fbbf24;
+  background: rgba(251, 191, 36, 0.2);
+  border: 1px solid rgba(251, 191, 36, 0.4);
+}
+
+.clip-indicator.dimmer {
+  color: #22d3ee;
+  background: rgba(34, 211, 238, 0.2);
+  border: 1px solid rgba(34, 211, 238, 0.4);
 }
 
 /* Resize Handles */

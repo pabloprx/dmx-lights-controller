@@ -75,23 +75,24 @@ function handlePresetModalSave(presetData: Omit<Preset, 'id'>) {
   showAddPreset.value = false
 }
 
-// Handle preset click - toggle select/unselect and send DMX
-function handlePresetClick(presetId: string) {
-  // Toggle: if already selected, unselect
-  if (store.selectedPresetId.value === presetId) {
-    store.selectPreset(null)
-    return
-  }
+// Handle color preset click - can combine with strobe/dimmer effect
+function handleColorClick(presetId: string) {
+  store.selectColorPreset(presetId)
+}
 
-  store.selectPreset(presetId)
+// Handle effect preset click (strobe OR dimmer - mutually exclusive)
+function handleEffectClick(presetId: string) {
+  store.selectEffectPreset(presetId)
+}
 
-  // Send DMX to selected device OR all devices in group
-  if (store.selectedDevice.value) {
-    store.applyPresetToDevice(presetId, store.selectedDevice.value.id)
-  } else if (store.selectedGroup.value) {
-    // Apply to all devices in the group at once
-    store.applyPresetToDevices(presetId, store.selectedGroup.value.deviceIds)
-  }
+// Check if color is selected
+function isColorSelected(presetId: string): boolean {
+  return store.selectedColorPresetId.value === presetId
+}
+
+// Check if effect is selected
+function isEffectSelected(presetId: string): boolean {
+  return store.selectedEffectPresetId.value === presetId
 }
 
 // Send laser channel values to DMX
@@ -211,17 +212,17 @@ watch(laserChannels, sendLaserChannels, { deep: true })
                 :key="preset.id"
                 class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
                        border-2 flex items-center justify-center"
-                :class="store.selectedPresetId.value === preset.id
+                :class="isColorSelected(preset.id)
                   ? 'border-white scale-105 z-10'
                   : 'border-transparent hover:scale-105'"
                 :style="{
                   background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
-                  boxShadow: store.selectedPresetId.value === preset.id
+                  boxShadow: isColorSelected(preset.id)
                     ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
                     : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
                 }"
                 :title="preset.name"
-                @click="handlePresetClick(preset.id)"
+                @click="handleColorClick(preset.id)"
               >
                 <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
                   {{ preset.name }}
@@ -230,64 +231,64 @@ watch(laserChannels, sendLaserChannels, { deep: true })
             </div>
           </div>
 
-          <!-- Strobe Buttons -->
+          <!-- Strobe Buttons (effect - mutually exclusive with dimmer) -->
           <div>
-            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Strobe</span>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-amber-400/70 mb-2">Strobe</span>
             <div class="flex gap-1.5">
               <button
                 v-for="preset in strobePresets"
                 :key="preset.id"
                 class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
                        border border-zinc-800"
-                :class="store.selectedPresetId.value === preset.id
-                  ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                :class="isEffectSelected(preset.id)
+                  ? 'bg-amber-500/20 text-amber-400 border-amber-500 shadow-[0_0_15px_#f59e0b30]'
                   : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-                @click="handlePresetClick(preset.id)"
+                @click="handleEffectClick(preset.id)"
               >
                 {{ preset.name.replace('Strobe ', '') }}
               </button>
             </div>
           </div>
 
-          <!-- Dimmer Presets -->
+          <!-- Dimmer Presets (effect - mutually exclusive with strobe) -->
           <div>
-            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Dimmer</span>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-cyan-400/70 mb-2">Dimmer</span>
             <div class="flex gap-1.5">
               <button
                 v-for="preset in dimmerPresets"
                 :key="preset.id"
                 class="flex-1 py-2 px-2 rounded-lg text-xs font-medium transition-all duration-200
                        border border-zinc-800"
-                :class="store.selectedPresetId.value === preset.id
-                  ? 'bg-green-500/20 text-green-400 border-green-500 shadow-[0_0_15px_#22c55e30]'
+                :class="isEffectSelected(preset.id)
+                  ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500 shadow-[0_0_15px_#06b6d430]'
                   : 'bg-zinc-900 text-zinc-400 hover:bg-zinc-800 hover:text-zinc-300'"
-                @click="handlePresetClick(preset.id)"
+                @click="handleEffectClick(preset.id)"
               >
                 {{ preset.name }}
               </button>
             </div>
           </div>
 
-          <!-- Custom Presets -->
+          <!-- Recent/Custom Presets -->
           <div v-if="customPresets.length > 0">
-            <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Custom</span>
+            <span class="block text-[10px] font-mono uppercase tracking-widest text-purple-400/70 mb-2">Recent</span>
             <div class="grid grid-cols-4 gap-1.5">
               <button
                 v-for="preset in customPresets"
                 :key="preset.id"
                 class="color-pad aspect-square rounded-lg transition-all duration-200 relative overflow-hidden
                        border-2 flex items-center justify-center"
-                :class="store.selectedPresetId.value === preset.id
+                :class="isColorSelected(preset.id)
                   ? 'border-white scale-105 z-10'
                   : 'border-transparent hover:scale-105'"
                 :style="{
                   background: `linear-gradient(135deg, ${getPreviewColor(preset.values)} 0%, color-mix(in srgb, ${getPreviewColor(preset.values)} 70%, black) 100%)`,
-                  boxShadow: store.selectedPresetId.value === preset.id
+                  boxShadow: isColorSelected(preset.id)
                     ? `0 0 20px ${getPreviewColor(preset.values)}, 0 4px 12px rgba(0,0,0,0.4)`
                     : `0 4px 12px rgba(0,0,0,0.3), inset 0 1px 0 rgba(255,255,255,0.1)`
                 }"
                 :title="preset.name"
-                @click="handlePresetClick(preset.id)"
+                @click="handleColorClick(preset.id)"
               >
                 <span class="text-[9px] font-bold text-white/90 drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] uppercase">
                   {{ preset.name }}
@@ -296,17 +297,29 @@ watch(laserChannels, sendLaserChannels, { deep: true })
             </div>
           </div>
 
-          <!-- Selection indicator + Clear button -->
-          <div v-if="store.selectedPresetId.value" class="flex items-center gap-2 p-2 rounded-lg bg-green-500/10 border border-green-500/30">
-            <span class="text-xs text-green-400 flex-1">
-              Selected: <strong>{{ store.getPreset(store.selectedPresetId.value)?.name }}</strong>
-            </span>
-            <button
-              class="px-2 py-1 text-[10px] rounded bg-zinc-800 text-zinc-400 hover:bg-zinc-700 hover:text-white"
-              @click="store.selectPreset(null)"
-            >
-              Clear
-            </button>
+          <!-- Combined selection indicator -->
+          <div v-if="store.selectedColorPresetId.value || store.selectedEffectPresetId.value" class="p-2 rounded-lg bg-zinc-800/50 border border-zinc-700/50 space-y-1">
+            <div class="flex items-center justify-between">
+              <span class="text-[10px] font-mono text-zinc-500 uppercase">Active</span>
+              <button
+                class="px-2 py-0.5 text-[9px] rounded bg-zinc-700 text-zinc-400 hover:bg-zinc-600 hover:text-white"
+                @click="store.selectColorPreset(null); store.selectEffectPreset(null)"
+              >
+                Clear All
+              </button>
+            </div>
+            <div class="flex flex-wrap gap-1">
+              <span v-if="store.selectedColorPresetId.value" class="px-2 py-0.5 text-[10px] rounded bg-green-500/20 text-green-400 border border-green-500/30">
+                {{ store.getPreset(store.selectedColorPresetId.value)?.name }}
+              </span>
+              <span v-if="store.selectedEffectPresetId.value" class="px-2 py-0.5 text-[10px] rounded"
+                :class="store.getPreset(store.selectedEffectPresetId.value)?.category === 'strobe'
+                  ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                  : 'bg-cyan-500/20 text-cyan-400 border border-cyan-500/30'"
+              >
+                {{ store.getPreset(store.selectedEffectPresetId.value)?.name }}
+              </span>
+            </div>
           </div>
 
           <!-- Add Custom Preset Button -->
