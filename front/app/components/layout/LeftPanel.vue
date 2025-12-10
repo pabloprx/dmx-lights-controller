@@ -94,6 +94,24 @@ function isDeviceCompatibleForGroup(deviceId: string): boolean {
   return device?.profileId === groupProfileId.value
 }
 
+// Create v-model compatible getters for checkboxes (Add Group dialog)
+function getDeviceCheckedForGroup(deviceId: string): boolean {
+  return selectedDevicesForGroup.value.includes(deviceId)
+}
+
+function setDeviceCheckedForGroup(deviceId: string, checked: boolean) {
+  if (checked) {
+    if (!selectedDevicesForGroup.value.includes(deviceId)) {
+      selectedDevicesForGroup.value.push(deviceId)
+    }
+  } else {
+    const idx = selectedDevicesForGroup.value.indexOf(deviceId)
+    if (idx !== -1) {
+      selectedDevicesForGroup.value.splice(idx, 1)
+    }
+  }
+}
+
 // Edit device dialog
 const showEditDevice = ref(false)
 const editingDeviceId = ref<string | null>(null)
@@ -159,6 +177,24 @@ function isDeviceCompatibleForEditGroup(deviceId: string): boolean {
   if (!editingGroupProfile.value) return true
   const device = store.devices.value.find(d => d.id === deviceId)
   return device?.profileId === editingGroupProfile.value
+}
+
+// Create v-model compatible getters for checkboxes (Edit Group dialog)
+function getDeviceCheckedForEditGroup(deviceId: string): boolean {
+  return editGroupDevices.value.includes(deviceId)
+}
+
+function setDeviceCheckedForEditGroup(deviceId: string, checked: boolean) {
+  if (checked) {
+    if (!editGroupDevices.value.includes(deviceId)) {
+      editGroupDevices.value.push(deviceId)
+    }
+  } else {
+    const idx = editGroupDevices.value.indexOf(deviceId)
+    if (idx !== -1) {
+      editGroupDevices.value.splice(idx, 1)
+    }
+  }
 }
 
 function handleEditGroup() {
@@ -470,9 +506,9 @@ function handleDeleteGroup() {
                 @click="isDeviceCompatibleForGroup(device.id) && toggleDeviceForGroup(device.id)"
               >
                 <Checkbox
-                  :checked="selectedDevicesForGroup.includes(device.id)"
+                  :model-value="getDeviceCheckedForGroup(device.id)"
                   :disabled="!isDeviceCompatibleForGroup(device.id)"
-                  @update:checked="isDeviceCompatibleForGroup(device.id) && toggleDeviceForGroup(device.id)"
+                  @update:model-value="(checked) => setDeviceCheckedForGroup(device.id, checked === true)"
                 />
                 <span
                   class="ml-2 px-1.5 py-0.5 text-[9px] font-bold rounded"
@@ -569,9 +605,9 @@ function handleDeleteGroup() {
                 @click="isDeviceCompatibleForEditGroup(device.id) && toggleDeviceForEditGroup(device.id)"
               >
                 <Checkbox
-                  :checked="editGroupDevices.includes(device.id)"
+                  :model-value="getDeviceCheckedForEditGroup(device.id)"
                   :disabled="!isDeviceCompatibleForEditGroup(device.id)"
-                  @update:checked="isDeviceCompatibleForEditGroup(device.id) && toggleDeviceForEditGroup(device.id)"
+                  @update:model-value="(checked) => setDeviceCheckedForEditGroup(device.id, checked === true)"
                 />
                 <span
                   class="ml-2 px-1.5 py-0.5 text-[9px] font-bold rounded"
