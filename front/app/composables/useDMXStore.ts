@@ -548,30 +548,36 @@ export function useDMXStore() {
 
   // Apply preset to selected device and send DMX (for testing mode)
   function applyPresetToDevice(presetId: string, deviceId: string) {
+    applyPresetToDevices(presetId, [deviceId])
+  }
+
+  // Apply preset to multiple devices at once (for groups)
+  function applyPresetToDevices(presetId: string, deviceIds: string[]) {
     const preset = getPreset(presetId)
-    const device = getDevice(deviceId)
-    if (!preset || !device) return
+    if (!preset) return
 
     const channels = presetToChannels(preset)
-    const start = device.startChannel - 1
 
-    // For dimmer presets: only update channel 0 (dimmer), preserve current RGB state
-    if (preset.category === 'dimmer') {
-      // Store RAW dimmer value (before scaling)
-      currentDMXState.value[start] = channels[0]
-      const sent = sendDMXWithDimmer()
-      console.log('[DMX] Sent DIMMER preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ') raw:', channels[0], 'scaled:', sent[start], 'master:', masterDimmer.value, '%')
-      return
+    for (const deviceId of deviceIds) {
+      const device = getDevice(deviceId)
+      if (!device) continue
+
+      const start = device.startChannel - 1
+
+      // For dimmer presets: only update channel 0 (dimmer), preserve current RGB state
+      if (preset.category === 'dimmer') {
+        currentDMXState.value[start] = channels[0]
+      } else {
+        // For normal presets: update all channels
+        for (let i = 0; i < channels.length && start + i < 100; i++) {
+          currentDMXState.value[start + i] = channels[i]
+        }
+      }
     }
 
-    // For normal presets: update all channels and track RAW state
-    for (let i = 0; i < channels.length && start + i < 100; i++) {
-      currentDMXState.value[start + i] = channels[i]
-    }
-
-    // Send with master dimmer applied
+    // Send with master dimmer applied (once for all devices)
     const sent = sendDMXWithDimmer()
-    console.log('[DMX] Sent preset to device:', preset.name, '->', device.name, '(ch', device.startChannel, ') master:', masterDimmer.value, '%', sent.slice(0, 10))
+    console.log('[DMX] Sent preset to', deviceIds.length, 'devices:', preset.name, 'master:', masterDimmer.value, '%', sent.slice(0, 16))
   }
 
   // Send blackout (all zeros)
@@ -796,6 +802,7 @@ export function useDMXStore() {
     // DMX output
     serialConnected,
     applyPresetToDevice,
+    applyPresetToDevices,
     sendBlackout,
     sendDMX,
     refreshDMXWithDimmer,

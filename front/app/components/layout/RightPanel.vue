@@ -8,10 +8,35 @@ const store = useDMXStore()
 
 const presetsExpanded = ref(true)
 
-// Get selected device's profile
+// Check if we have a device or group selected
+const hasSelection = computed(() => store.selectedDevice.value || store.selectedGroup.value)
+const isGroupSelected = computed(() => !!store.selectedGroup.value && !store.selectedDevice.value)
+
+// Get selected device's or group's profile
 const selectedProfile = computed((): DeviceProfile | null => {
-  if (!store.selectedDevice.value) return null
-  return getProfileById(store.selectedDevice.value.profileId) || null
+  if (store.selectedDevice.value) {
+    return getProfileById(store.selectedDevice.value.profileId) || null
+  }
+  if (store.selectedGroup.value) {
+    return getProfileById(store.selectedGroup.value.profileId) || null
+  }
+  return null
+})
+
+// Get the display name for the selection
+const selectionName = computed(() => {
+  if (store.selectedDevice.value) return store.selectedDevice.value.name
+  if (store.selectedGroup.value) return store.selectedGroup.value.name
+  return null
+})
+
+// Get a device ID for the preset modal (first device in group if group selected)
+const presetModalDeviceId = computed(() => {
+  if (store.selectedDevice.value) return store.selectedDevice.value.id
+  if (store.selectedGroup.value && store.selectedGroup.value.deviceIds.length > 0) {
+    return store.selectedGroup.value.deviceIds[0]
+  }
+  return null
 })
 
 // Control type determines which UI to show
@@ -60,9 +85,12 @@ function handlePresetClick(presetId: string) {
 
   store.selectPreset(presetId)
 
-  // Send DMX to selected device
+  // Send DMX to selected device OR all devices in group
   if (store.selectedDevice.value) {
     store.applyPresetToDevice(presetId, store.selectedDevice.value.id)
+  } else if (store.selectedGroup.value) {
+    // Apply to all devices in the group at once
+    store.applyPresetToDevices(presetId, store.selectedGroup.value.deviceIds)
   }
 }
 
@@ -126,16 +154,28 @@ watch(laserChannels, sendLaserChannels, { deep: true })
       </button>
 
       <div v-if="presetsExpanded" class="px-3 py-3 space-y-4">
-        <!-- No device selected state -->
-        <div v-if="!store.selectedDevice.value" class="py-8 text-center">
+        <!-- No device/group selected state -->
+        <div v-if="!hasSelection" class="py-8 text-center">
           <div class="text-zinc-500 text-xs mb-2">No device selected</div>
-          <div class="text-zinc-600 text-[10px]">Select a device from the left panel</div>
+          <div class="text-zinc-600 text-[10px]">Select a device or group from the left panel</div>
+        </div>
+
+        <!-- Group indicator -->
+        <div v-else-if="isGroupSelected" class="flex items-center gap-2 p-2 rounded-lg bg-purple-500/10 border border-purple-500/30 mb-2">
+          <span
+            class="w-3 h-3 rounded-sm"
+            :style="{ backgroundColor: store.selectedGroup.value?.color }"
+          />
+          <span class="text-xs text-purple-400">
+            Group: <strong>{{ store.selectedGroup.value?.name }}</strong>
+            <span class="text-purple-400/60 ml-1">({{ store.selectedGroup.value?.deviceIds.length }} devices)</span>
+          </span>
         </div>
 
         <!-- ═══════════════════════════════════════════════════════════
              LASER CHANNEL SLIDERS (controlType: 'sliders')
              ═══════════════════════════════════════════════════════════ -->
-        <template v-else-if="controlType === 'sliders' && selectedProfile">
+        <template v-if="hasSelection && controlType === 'sliders' && selectedProfile">
           <div
             v-for="(channel, idx) in selectedProfile.channels"
             :key="channel.offset"
@@ -161,7 +201,7 @@ watch(laserChannels, sendLaserChannels, { deep: true })
         <!-- ═══════════════════════════════════════════════════════════
              RGBW COLOR PRESETS (controlType: 'rgbw')
              ═══════════════════════════════════════════════════════════ -->
-        <template v-else>
+        <template v-if="hasSelection && controlType === 'rgbw'">
           <!-- Color Grid - GLOWING PADS -->
           <div>
             <span class="block text-[10px] font-mono uppercase tracking-widest text-green-400/70 mb-2">Colors</span>
@@ -286,9 +326,9 @@ watch(laserChannels, sendLaserChannels, { deep: true })
 
     <!-- Add Custom Preset Modal (reuses PresetEditorModal) -->
     <PresetEditorModal
-      v-if="store.selectedDevice.value"
+      v-if="presetModalDeviceId"
       :open="showAddPreset"
-      :device-id="store.selectedDevice.value.id"
+      :device-id="presetModalDeviceId"
       :preset="null"
       @update:open="showAddPreset = $event"
       @save="handlePresetModalSave"
