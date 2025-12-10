@@ -9,6 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
 import { Input } from '@/components/ui/input'
 import PresetEditorModal from '~/components/presets/PresetEditorModal.vue'
+import PresetPalette from '~/components/sets/PresetPalette.vue'
 
 const store = useDMXStore()
 const player = useSetPlayer()
@@ -87,7 +88,7 @@ function handleLoadScene() {
 const showPresetEditor = ref(false)
 const presetEditorDeviceId = ref<string>('')
 const presetEditorBeat = ref<number>(1)
-const presetEditorTrackId = ref<string>('')
+const presetEditorTrackId = ref<string | null>(null)
 const presetEditorExistingPreset = ref<Preset | null>(null)
 
 // Get target device for a track (for preview)
@@ -105,8 +106,17 @@ function getTrackTargetDeviceId(trackId: string): string | null {
   }
 }
 
-function openPresetEditor(trackId: string, beat: number, existingPreset: Preset | null = null) {
-  const deviceId = getTrackTargetDeviceId(trackId)
+function openPresetEditor(trackId: string | null, beat: number, existingPreset: Preset | null = null) {
+  let deviceId: string | null = null
+
+  if (trackId) {
+    // Opening for a specific track
+    deviceId = getTrackTargetDeviceId(trackId)
+  } else {
+    // Opening from palette - use selected device or first device
+    deviceId = store.selectedDeviceId.value || store.devices.value[0]?.id || null
+  }
+
   if (!deviceId) return
 
   presetEditorDeviceId.value = deviceId
@@ -117,19 +127,22 @@ function openPresetEditor(trackId: string, beat: number, existingPreset: Preset 
 }
 
 function handlePresetSave(presetData: Omit<Preset, 'id'>) {
-  if (!currentSet.value) return
-
   // Add preset to library
   const newPreset = store.addPreset(presetData)
 
-  // Add clip at the beat
-  store.addClipToSet(
-    currentSet.value.id,
-    presetEditorTrackId.value,
-    newPreset.id,
-    presetEditorBeat.value,
-    1
-  )
+  // Also set as active brush for immediate painting
+  store.setActiveBrush(newPreset.id)
+
+  // Only add clip if we have a track context (opened from grid, not palette)
+  if (currentSet.value && presetEditorTrackId.value) {
+    store.addClipToSet(
+      currentSet.value.id,
+      presetEditorTrackId.value,
+      newPreset.id,
+      presetEditorBeat.value,
+      1
+    )
+  }
 
   showPresetEditor.value = false
 }
@@ -153,7 +166,7 @@ function getClipColor(presetId: string): string {
   return getPresetDisplayColor(preset)
 }
 
-// Handle cell click (place/remove clip or open editor)
+// Handle cell click (paint/erase based on tool mode)
 function handleCellClick(trackId: string, beat: number) {
   if (!currentSet.value) return
 
@@ -162,25 +175,49 @@ function handleCellClick(trackId: string, beat: number) {
     c => c.trackId === trackId && beat >= c.startBeat && beat < c.startBeat + c.duration
   )
 
+  // ERASE MODE: Always delete
+  if (store.toolMode.value === 'erase') {
+    if (existingClip) {
+      store.deleteClip(currentSet.value.id, existingClip.id)
+    }
+    return
+  }
+
+  // PAINT MODE: Use active brush or fallback to legacy behavior
+  if (store.activeBrushId.value) {
+    const preset = store.getPreset(store.activeBrushId.value)
+    const deviceId = getTrackTargetDeviceId(trackId)
+    const device = deviceId ? store.getDevice(deviceId) : null
+
+    if (preset && device && preset.profileId === device.profileId) {
+      if (existingClip) {
+        // Replace existing clip with new preset
+        store.deleteClip(currentSet.value.id, existingClip.id)
+      }
+      store.addClipToSet(currentSet.value.id, trackId, store.activeBrushId.value, beat, 1)
+      return
+    }
+  }
+
+  // Legacy fallback: use selectedPresetId if no active brush
+  if (store.selectedPresetId.value) {
+    const preset = store.getPreset(store.selectedPresetId.value)
+    const deviceId = getTrackTargetDeviceId(trackId)
+    const device = deviceId ? store.getDevice(deviceId) : null
+
+    if (preset && device && preset.profileId === device.profileId) {
+      if (existingClip) {
+        store.deleteClip(currentSet.value.id, existingClip.id)
+      }
+      store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1)
+      return
+    }
+  }
+
+  // No brush/preset: click on existing deletes, click on empty opens editor
   if (existingClip) {
-    // Existing clip: remove it (double-click to edit could be added later)
     store.deleteClip(currentSet.value.id, existingClip.id)
   } else {
-    // No clip: check if we have a selected preset, otherwise open editor
-    if (store.selectedPresetId.value) {
-      // If preset is selected AND matches the track's profile, use it directly
-      const preset = store.getPreset(store.selectedPresetId.value)
-      const deviceId = getTrackTargetDeviceId(trackId)
-      const device = deviceId ? store.getDevice(deviceId) : null
-
-      if (preset && device && preset.profileId === device.profileId) {
-        // Selected preset matches track profile - use it
-        store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1)
-        return
-      }
-    }
-
-    // No matching preset selected - open the editor modal
     openPresetEditor(trackId, beat)
   }
 }
@@ -323,6 +360,9 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
         <span class="current-beat">Beat: {{ player.beatInSet.value }}</span>
       </div>
     </div>
+
+    <!-- Preset Palette -->
+    <PresetPalette @open-preset-editor="openPresetEditor(null, player.beatInSet.value)" />
 
     <!-- Timeline Grid -->
     <div v-if="currentSet" class="timeline-container">
