@@ -20,12 +20,31 @@ const BEAT_WIDTH = 60
 // Create first set if none exists
 onMounted(() => {
   if (store.sets.value.length === 0) {
-    store.addSet({ name: 'Set 1' })
-    store.selectSet(store.sets.value[0].id)
-  } else if (!store.selectedSetId.value) {
+    const newSet = store.addSet({ name: 'Set 1' })
+    store.selectSet(newSet.id)
+  } else if (!store.selectedSetId.value && store.sets.value[0]) {
     store.selectSet(store.sets.value[0].id)
   }
+
+  // Keyboard shortcuts for tool modes
+  window.addEventListener('keydown', handleKeyDown)
 })
+
+onUnmounted(() => {
+  window.removeEventListener('keydown', handleKeyDown)
+})
+
+function handleKeyDown(e: KeyboardEvent) {
+  // Ignore if typing in an input
+  if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') {
+    return
+  }
+  if (e.key === 'p' || e.key === 'P') {
+    store.setToolMode('paint')
+  } else if (e.key === 'e' || e.key === 'E') {
+    store.setToolMode('erase')
+  }
+}
 
 const currentSet = computed(() => store.selectedSet.value)
 
@@ -388,6 +407,50 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
       </div>
     </div>
 
+    <!-- Tool Mode Toolbar -->
+    <div v-if="currentSet" class="tool-toolbar">
+      <div class="tool-group">
+        <button
+          class="tool-btn"
+          :class="{ active: store.toolMode.value === 'paint' }"
+          title="Paint Mode (P)"
+          @click="store.setToolMode('paint')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M12 19l7-7 3 3-7 7-3-3z" />
+            <path d="M18 13l-1.5-7.5L2 2l3.5 14.5L13 18l5-5z" />
+          </svg>
+          <span>Paint</span>
+        </button>
+        <button
+          class="tool-btn"
+          :class="{ active: store.toolMode.value === 'erase' }"
+          title="Erase Mode (E)"
+          @click="store.setToolMode('erase')"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M20 20H7L3 16c-.8-.8-.8-2 0-2.8L13.5 2.7a2 2 0 0 1 2.8 0L21 7.3a2 2 0 0 1 0 2.8L11 20" />
+          </svg>
+          <span>Erase</span>
+        </button>
+      </div>
+
+      <div class="toolbar-divider" />
+
+      <div class="brush-indicator" v-if="store.activeBrush.value">
+        <span class="brush-label">BRUSH:</span>
+        <span
+          class="brush-swatch"
+          :style="{ backgroundColor: getClipColor(store.activeBrushId.value!) }"
+        />
+        <span class="brush-name">{{ store.activeBrush.value.name }}</span>
+      </div>
+      <div class="brush-indicator no-brush" v-else>
+        <span class="brush-label">BRUSH:</span>
+        <span class="brush-name">None selected</span>
+      </div>
+    </div>
+
     <!-- Timeline Grid -->
     <div v-if="currentSet" class="timeline-container">
       <!-- Beat Ruler -->
@@ -668,6 +731,97 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   flex-direction: column;
   height: 100%;
   background: #1a1b21;
+}
+
+/* Tool Mode Toolbar */
+.tool-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 16px;
+  background: linear-gradient(180deg, #1e1f26 0%, #1a1b21 100%);
+  border-bottom: 1px solid #2a2b36;
+}
+
+.tool-group {
+  display: flex;
+  gap: 4px;
+}
+
+.tool-toolbar .tool-btn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: #22232b;
+  border: 1px solid #383944;
+  border-radius: 6px;
+  color: #777;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.tool-toolbar .tool-btn:hover {
+  background: #2a2b35;
+  color: #aaa;
+}
+
+.tool-toolbar .tool-btn.active {
+  background: #22c55e15;
+  border-color: #22c55e50;
+  color: #22c55e;
+  box-shadow: 0 0 12px #22c55e20;
+}
+
+.tool-toolbar .tool-btn.active[title*="Erase"] {
+  background: #ef444415;
+  border-color: #ef444450;
+  color: #ef4444;
+  box-shadow: 0 0 12px #ef444420;
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 24px;
+  background: #383944;
+}
+
+.brush-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 12px;
+  background: #22232b;
+  border: 1px solid #383944;
+  border-radius: 6px;
+}
+
+.brush-indicator.no-brush {
+  opacity: 0.5;
+}
+
+.brush-label {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #555;
+  letter-spacing: 0.05em;
+}
+
+.brush-swatch {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.2);
+  box-shadow: 0 0 8px currentColor;
+}
+
+.brush-name {
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #22c55e;
+  font-weight: 600;
 }
 
 /* Header */

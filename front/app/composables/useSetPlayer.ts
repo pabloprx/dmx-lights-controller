@@ -234,26 +234,45 @@ export function useSetPlayer() {
     return true
   }
 
-  // Apply master dimmer to ALL devices' channel 0 (dimmer channel)
+  // Apply master dimmer to ALL devices
+  // For normal mode: scale channel 0 (dimmer)
+  // For strobe mode: scale RGB channels (1-3) since they control intensity
   function applyMasterDimmer(channels: number[], dimmerPercent: number): number[] {
     const result = [...channels]
     const scale = dimmerPercent / 100
 
-    // Auto-apply to all devices' dimmer channel (offset 0)
+    // Auto-apply to all devices
     const devices = store.devices.value
     for (const device of devices) {
       const idx = device.startChannel - 1 // Convert to 0-indexed
       if (idx >= 0 && idx < result.length) {
         const baseDimmer = result[idx]
-        // Only scale if it's in dimmer range (9-134 for pinspot)
-        if (baseDimmer >= 9 && baseDimmer <= 134) {
+
+        // Check if device is in strobe mode (135-239 on channel 0)
+        const isStrobeMode = baseDimmer >= 135 && baseDimmer <= 239
+
+        if (isStrobeMode) {
+          // Strobe mode: dim the RGB channels instead (offsets 1-3)
+          // In strobe mode, RGB channels control intensity/color
+          for (let rgbOffset = 1; rgbOffset <= 3; rgbOffset++) {
+            const rgbIdx = idx + rgbOffset
+            if (rgbIdx < result.length) {
+              result[rgbIdx] = Math.round(result[rgbIdx] * scale)
+            }
+          }
+          // Also scale white channel (offset 4) if present
+          const whiteIdx = idx + 4
+          if (whiteIdx < result.length) {
+            result[whiteIdx] = Math.round(result[whiteIdx] * scale)
+          }
+        } else if (baseDimmer >= 9 && baseDimmer <= 134) {
+          // Normal dimmer mode: scale channel 0
           const intensity = (baseDimmer - 9) / 125 // 0-1
           result[idx] = Math.round(9 + intensity * scale * 125)
         } else if (baseDimmer >= 240) {
           // Full mode: convert to scaled dimmer
           result[idx] = Math.round(9 + scale * 125)
         }
-        // Don't touch strobe mode (135-239)
       }
     }
 

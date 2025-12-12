@@ -32,6 +32,7 @@ const {
   toggleInternalPlayback,
   setInternalTempo,
   stepBeat,
+  tapTempo,
 } = useAppMode()
 const {
   isPlaying, play, stop, audioReactive,
@@ -187,9 +188,16 @@ function confirmExitPerformance() {
           min="20"
           max="300"
           class="w-16 bg-neutral-800 text-white text-center rounded px-2 py-1 text-sm font-mono"
-          @change="(e) => setInternalTempo(Number((e.target as HTMLInputElement).value))"
+          @input="(e) => setInternalTempo(Number((e.target as HTMLInputElement).value))"
         />
         <span class="text-neutral-500 text-sm">BPM</span>
+        <button
+          class="px-2 py-1 rounded text-xs bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white cursor-pointer transition-colors"
+          title="Tap to set BPM"
+          @click="tapTempo"
+        >
+          TAP
+        </button>
         <div class="text-neutral-600 text-xs font-mono ml-2">beat: {{ internalBeat }}</div>
       </template>
 

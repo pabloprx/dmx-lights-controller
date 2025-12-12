@@ -14,6 +14,11 @@ const internalBeat = ref(0)
 
 let internalInterval: ReturnType<typeof setInterval> | null = null
 
+// Tap tempo state
+const tapTimes: number[] = []
+const TAP_TIMEOUT = 2000 // Reset if no tap for 2 seconds
+const TAP_MIN_COUNT = 2  // Need at least 2 taps to calculate
+
 export function useAppMode() {
   const { isConnected: serialConnected, sendDMX } = useUnifiedSerial()
 
@@ -109,6 +114,34 @@ export function useAppMode() {
     internalBeat.value++
   }
 
+  // Tap tempo - calculate BPM from tap intervals
+  function tapTempo() {
+    const now = Date.now()
+
+    // Reset if too much time has passed since last tap
+    if (tapTimes.length > 0 && now - tapTimes[tapTimes.length - 1] > TAP_TIMEOUT) {
+      tapTimes.length = 0
+    }
+
+    tapTimes.push(now)
+
+    // Keep only last 4 taps for averaging
+    if (tapTimes.length > 4) {
+      tapTimes.shift()
+    }
+
+    // Calculate BPM if we have enough taps
+    if (tapTimes.length >= TAP_MIN_COUNT) {
+      const intervals: number[] = []
+      for (let i = 1; i < tapTimes.length; i++) {
+        intervals.push(tapTimes[i] - tapTimes[i - 1])
+      }
+      const avgInterval = intervals.reduce((a, b) => a + b, 0) / intervals.length
+      const bpm = Math.round(60000 / avgInterval)
+      setInternalTempo(bpm)
+    }
+  }
+
   return {
     // Mode
     mode: readonly(mode),
@@ -133,5 +166,6 @@ export function useAppMode() {
     toggleInternalPlayback,
     setInternalTempo,
     stepBeat,
+    tapTempo,
   }
 }
