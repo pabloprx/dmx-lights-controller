@@ -191,12 +191,20 @@ function getClipColor(presetId: string): string {
   return getPresetDisplayColor(preset)
 }
 
-// Get strobe/dimmer indicators for a clip
-function getClipIndicators(presetId: string): { strobe?: string; dimmer?: string } {
+// Get strobe/dimmer/audio indicators for a clip
+function getClipIndicators(presetId: string): { strobe?: string; dimmer?: string; audio?: string } {
   const preset = store.getPreset(presetId)
-  if (!preset?.values) return {}
+  if (!preset) return {}
 
-  const indicators: { strobe?: string; dimmer?: string } = {}
+  const indicators: { strobe?: string; dimmer?: string; audio?: string } = {}
+
+  // Audio reactive indicator (mic icon with band)
+  if (preset.audioReactive?.enabled) {
+    const bandLabel = { bass: 'B', mid: 'M', high: 'H' }
+    indicators.audio = bandLabel[preset.audioReactive.band] || 'B'
+  }
+
+  if (!preset.values) return indicators
 
   if (preset.values.strobe) {
     const speedLabel = { slow: 'S', medium: 'M', fast: 'F' }
@@ -529,8 +537,11 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
                 <span class="clip-name">
                   {{ store.getPreset(getClipAtBeat(track.id, beat)!.presetId)?.name }}
                 </span>
-                <!-- Strobe/Dimmer indicators -->
+                <!-- Strobe/Dimmer/Audio indicators -->
                 <div class="clip-indicators">
+                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).audio" class="clip-indicator audio" title="Audio reactive">
+                    🎤{{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).audio }}
+                  </span>
                   <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe" class="clip-indicator strobe">
                     ⚡{{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe }}
                   </span>
@@ -1235,6 +1246,12 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   color: #22d3ee;
   background: rgba(34, 211, 238, 0.2);
   border: 1px solid rgba(34, 211, 238, 0.4);
+}
+
+.clip-indicator.audio {
+  color: #a855f7;
+  background: rgba(168, 85, 247, 0.2);
+  border: 1px solid rgba(168, 85, 247, 0.4);
 }
 
 /* Resize Handles */
