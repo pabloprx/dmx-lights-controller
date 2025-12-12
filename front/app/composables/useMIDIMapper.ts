@@ -16,10 +16,12 @@ export type MIDIActionType =
   | 'master:blackout'
   | 'transport:play'
   | 'transport:stop'
+  | 'transport:tap'    // Tap tempo
   | 'set:next'
   | 'set:prev'
   | 'set:activate'  // Just activate, don't auto-play
   | 'set:trigger'   // Activate AND start playing
+  | 'set:direct'    // Quick set button - activate specific set by ID
 
 export interface MIDIAction {
   type: MIDIActionType
@@ -41,16 +43,17 @@ export interface MIDIMapping {
 
 const STORAGE_KEY = 'midi-mappings'
 
-// Default mappings based on QMK keyboard layout
-// Note 72 = C5 (Play/Pause), 73 = C#5 (Blackout), 74 = CC (Dimmer)
-// Note 79 = G5 (Prev), 80 = G#5 (Next), 83 = B5 (Set Active)
+// Default mappings for MIDI keyboard
+// CC 74 = Dimmer, Notes: 48=Play, 49=Blackout, 54=Activate, 55=Prev, 56=Next, 66=Tap, 53=Set1
 const DEFAULT_MAPPINGS: MIDIMapping[] = [
   { id: 'default-dimmer', name: 'Master Dimmer', midiType: 'cc', midiNumber: 74, channel: 1, action: { type: 'master:dimmer' } },
-  { id: 'default-play', name: 'Play/Pause', midiType: 'note', midiNumber: 72, channel: 1, action: { type: 'transport:play' } },
-  { id: 'default-blackout', name: 'Blackout', midiType: 'note', midiNumber: 73, channel: 1, action: { type: 'master:blackout' } },
-  { id: 'default-prev', name: 'Prev Set', midiType: 'note', midiNumber: 79, channel: 1, action: { type: 'set:prev' } },
-  { id: 'default-next', name: 'Next Set', midiType: 'note', midiNumber: 80, channel: 1, action: { type: 'set:next' } },
-  { id: 'default-setactive', name: 'Set Active', midiType: 'note', midiNumber: 83, channel: 1, action: { type: 'set:activate' } },
+  { id: 'default-play', name: 'Play/Pause', midiType: 'note', midiNumber: 48, channel: 1, action: { type: 'transport:play' } },
+  { id: 'default-blackout', name: 'Blackout', midiType: 'note', midiNumber: 49, channel: 1, action: { type: 'master:blackout' } },
+  { id: 'default-activate', name: 'Activate Set', midiType: 'note', midiNumber: 54, channel: 1, action: { type: 'set:activate' } },
+  { id: 'default-prev', name: 'Prev Set', midiType: 'note', midiNumber: 55, channel: 1, action: { type: 'set:prev' } },
+  { id: 'default-next', name: 'Next Set', midiType: 'note', midiNumber: 56, channel: 1, action: { type: 'set:next' } },
+  { id: 'default-tap', name: 'Tap Tempo', midiType: 'note', midiNumber: 66, channel: 1, action: { type: 'transport:tap' } },
+  { id: 'default-set1', name: 'Set 1', midiType: 'note', midiNumber: 53, channel: 1, action: { type: 'set:direct', setId: 'set-1' } },
 ]
 
 // ═══════════════════════════════════════════════════════════════
@@ -269,6 +272,12 @@ export function useMIDIMapper() {
         }
         break
 
+      case 'transport:tap':
+        if (value > 0) {
+          appMode.tapTempo()
+        }
+        break
+
       case 'set:next':
         if (value > 0) {
           nextSet()
@@ -278,6 +287,14 @@ export function useMIDIMapper() {
       case 'set:prev':
         if (value > 0) {
           prevSet()
+        }
+        break
+
+      case 'set:direct':
+        // Quick set button - activate specific set by ID
+        if (value > 0 && action.setId) {
+          store.selectSet(action.setId)
+          player.setActiveSet(action.setId)
         }
         break
 
@@ -308,7 +325,7 @@ export function useMIDIMapper() {
     }
   }
 
-  // Navigate sets - changes the selected/viewed set in the SetEditor dropdown
+  // Navigate sets - changes the selected/viewed set (use set:activate to make it active)
   function nextSet() {
     const allSets = store.sets.value
     if (allSets.length === 0) return

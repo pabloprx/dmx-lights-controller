@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useMIDIMapper, type MIDIMapping, type MIDIActionType } from '~/composables/useMIDIMapper'
 import { useMIDI } from '~/composables/useMIDI'
+import { useDMXStore } from '~/composables/useDMXStore'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -15,6 +16,7 @@ const emit = defineEmits<{
 
 const mapper = useMIDIMapper()
 const midi = useMIDI()
+const store = useDMXStore()
 
 // Filter to only valid mappings (safety net)
 const validMappings = computed(() => {
@@ -37,6 +39,7 @@ const editForm = ref({
   midiNumber: 0,
   channel: 1,
   actionType: 'master:dimmer' as MIDIActionType,
+  setId: '' as string,  // For set:direct
 })
 
 // Available actions
@@ -44,11 +47,12 @@ const actionOptions: { value: MIDIActionType; label: string }[] = [
   { value: 'master:dimmer', label: 'Master Dimmer' },
   { value: 'master:blackout', label: 'Blackout Toggle' },
   { value: 'transport:play', label: 'Play/Pause' },
-  { value: 'transport:stop', label: 'Stop' },
+  { value: 'transport:tap', label: 'Tap Tempo' },
   { value: 'set:next', label: 'Next Set' },
   { value: 'set:prev', label: 'Previous Set' },
   { value: 'set:activate', label: 'Activate Set' },
   { value: 'set:trigger', label: 'Trigger Set (+ Play)' },
+  { value: 'set:direct', label: 'Quick Set Button' },
 ]
 
 // Format MIDI input display
@@ -67,6 +71,7 @@ function startEdit(mapping: MIDIMapping) {
     midiNumber: mapping.midiNumber ?? 0,
     channel: mapping.channel ?? 1,
     actionType: mapping.action?.type || 'master:dimmer',
+    setId: mapping.action?.setId || '',
   }
 }
 
@@ -79,7 +84,10 @@ function saveEdit() {
     midiType: editForm.value.midiType,
     midiNumber: editForm.value.midiNumber,
     channel: editForm.value.channel,
-    action: { type: editForm.value.actionType },
+    action: {
+      type: editForm.value.actionType,
+      ...(editForm.value.setId ? { setId: editForm.value.setId } : {}),
+    },
   })
 
   editingId.value = null
@@ -99,6 +107,7 @@ function startAdd() {
     midiNumber: 60,
     channel: 1,
     actionType: 'transport:play',
+    setId: '',
   }
 }
 
@@ -109,7 +118,10 @@ function saveNew() {
     midiType: editForm.value.midiType,
     midiNumber: editForm.value.midiNumber,
     channel: editForm.value.channel,
-    action: { type: editForm.value.actionType },
+    action: {
+      type: editForm.value.actionType,
+      ...(editForm.value.setId ? { setId: editForm.value.setId } : {}),
+    },
   })
   editingId.value = null
 }
@@ -211,6 +223,19 @@ function getNoteName(note: number): string {
                 </select>
               </div>
             </div>
+            <!-- Set selector for Quick Set Button -->
+            <div v-if="editForm.actionType === 'set:direct'" class="mb-3">
+              <label class="text-xs text-neutral-400 mb-1 block">Select Set</label>
+              <select
+                v-model="editForm.setId"
+                class="w-full px-3 py-2 rounded bg-neutral-700 border border-neutral-600 text-sm"
+              >
+                <option value="">-- Select a set --</option>
+                <option v-for="set in store.sets.value" :key="set.id" :value="set.id">
+                  {{ set.name }}
+                </option>
+              </select>
+            </div>
             <div class="flex items-end gap-3">
               <!-- MIDI Input -->
               <div class="flex-1">
@@ -277,14 +302,26 @@ function getNoteName(note: number): string {
                     class="w-16 bg-neutral-700 border-neutral-600"
                   />
                 </div>
-                <select
-                  v-model="editForm.actionType"
-                  class="px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm"
-                >
-                  <option v-for="opt in actionOptions" :key="opt.value" :value="opt.value">
-                    {{ opt.label }}
-                  </option>
-                </select>
+                <div class="flex gap-1">
+                  <select
+                    v-model="editForm.actionType"
+                    class="flex-1 px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm"
+                  >
+                    <option v-for="opt in actionOptions" :key="opt.value" :value="opt.value">
+                      {{ opt.label }}
+                    </option>
+                  </select>
+                  <select
+                    v-if="editForm.actionType === 'set:direct'"
+                    v-model="editForm.setId"
+                    class="flex-1 px-2 py-1 rounded bg-neutral-700 border border-neutral-600 text-sm"
+                  >
+                    <option value="">-- Set --</option>
+                    <option v-for="set in store.sets.value" :key="set.id" :value="set.id">
+                      {{ set.name }}
+                    </option>
+                  </select>
+                </div>
                 <div class="flex gap-1">
                   <Button size="sm" @click="saveEdit">Save</Button>
                   <Button size="sm" variant="ghost" @click="cancelEdit">Cancel</Button>
@@ -309,6 +346,10 @@ function getNoteName(note: number): string {
               </div>
               <div class="text-sm text-green-400 min-w-[100px]">
                 {{ actionOptions.find(a => a.value === mapping.action?.type)?.label || 'Unknown' }}
+                <!-- Show set name for Quick Set Button -->
+                <span v-if="mapping.action?.setId" class="text-amber-400 ml-1">
+                  ({{ store.sets.value.find(s => s.id === mapping.action?.setId)?.name || '?' }})
+                </span>
                 <!-- Show value for CC mappings -->
                 <span v-if="mapping.midiType === 'cc' && mapper.lastTriggeredMappingId.value === mapping.id" class="text-neutral-400 ml-1">
                   ({{ mapper.lastTriggeredValue.value }})

@@ -1,8 +1,4 @@
-export interface AudioLevels {
-  bass: number
-  mid: number
-  high: number
-}
+import type { AudioLevels } from './useUnifiedSerial'
 
 const audioLevels = ref<AudioLevels>({ bass: 0, mid: 0, high: 0 })
 const isConnected = ref(false)
