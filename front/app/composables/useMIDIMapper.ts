@@ -71,7 +71,7 @@ let watcherInitialized = false
 let dimmerTarget = 100
 let dimmerCurrent = 100
 let dimmerAnimationFrame: number | null = null
-const DIMMER_SMOOTHING = 0.12 // Lower = smoother/slower (0-1)
+const DIMMER_SMOOTHING = 0.9 // Lower = smoother/slower (0-1)
 
 // Validate a mapping has all required fields
 function isValidMapping(m: any): m is MIDIMapping {
