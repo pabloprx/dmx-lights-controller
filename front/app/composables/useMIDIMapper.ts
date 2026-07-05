@@ -1,32 +1,15 @@
-// MIDI Mapper - Maps MIDI inputs to DMX actions
-// Handles CC, Note events and executes configured actions
+// MIDI Mapper - maps MIDI inputs to InputActions.
+// Execution is delegated to the shared, source-agnostic dispatcher
+// (useInputActions.dispatchAction) - the SAME executor the gamepad uses.
 
 import { ref, watch } from 'vue'
 import { useMIDI } from './useMIDI'
-import { useSetPlayer } from './useSetPlayer'
-import { useAppMode } from './useAppMode'
-import { useDMXStore } from './useDMXStore'
+import { useInputActions } from './useInputActions'
+import type { InputAction, InputActionType } from './useInputActions'
 
-// ═══════════════════════════════════════════════════════════════
-// TYPES
-// ═══════════════════════════════════════════════════════════════
-
-export type MIDIActionType =
-  | 'master:dimmer'
-  | 'master:blackout'
-  | 'transport:play'
-  | 'transport:stop'
-  | 'transport:tap'    // Tap tempo
-  | 'set:next'
-  | 'set:prev'
-  | 'set:activate'  // Just activate, don't auto-play
-  | 'set:trigger'   // Activate AND start playing
-  | 'set:direct'    // Quick set button - activate specific set by ID
-
-export interface MIDIAction {
-  type: MIDIActionType
-  setId?: string  // For set:trigger
-}
+// Back-compat aliases (the config modal imports these names)
+export type MIDIActionType = InputActionType
+export type MIDIAction = InputAction
 
 export interface MIDIMapping {
   id: string
@@ -37,14 +20,9 @@ export interface MIDIMapping {
   action: MIDIAction
 }
 
-// ═══════════════════════════════════════════════════════════════
-// STORAGE
-// ═══════════════════════════════════════════════════════════════
-
 const STORAGE_KEY = 'midi-mappings'
 
-// Default mappings for MIDI keyboard
-// CC 74 = Dimmer, Notes: 48=Play, 49=Blackout, 54=Activate, 55=Prev, 56=Next, 66=Tap, 53=Set1
+// Default mappings for a QMK MIDI keyboard (channel 1)
 const DEFAULT_MAPPINGS: MIDIMapping[] = [
   { id: 'default-dimmer', name: 'Master Dimmer', midiType: 'cc', midiNumber: 74, channel: 1, action: { type: 'master:dimmer' } },
   { id: 'default-play', name: 'Play/Pause', midiType: 'note', midiNumber: 48, channel: 1, action: { type: 'transport:play' } },
@@ -53,12 +31,7 @@ const DEFAULT_MAPPINGS: MIDIMapping[] = [
   { id: 'default-prev', name: 'Prev Set', midiType: 'note', midiNumber: 55, channel: 1, action: { type: 'set:prev' } },
   { id: 'default-next', name: 'Next Set', midiType: 'note', midiNumber: 56, channel: 1, action: { type: 'set:next' } },
   { id: 'default-tap', name: 'Tap Tempo', midiType: 'note', midiNumber: 66, channel: 1, action: { type: 'transport:tap' } },
-  { id: 'default-set1', name: 'Set 1', midiType: 'note', midiNumber: 53, channel: 1, action: { type: 'set:direct', setId: 'set-1' } },
 ]
-
-// ═══════════════════════════════════════════════════════════════
-// STATE (singleton)
-// ═══════════════════════════════════════════════════════════════
 
 const mappings = ref<MIDIMapping[]>([])
 const isLearning = ref(false)
@@ -67,13 +40,6 @@ const lastTriggeredMappingId = ref<string | null>(null)
 const lastTriggeredValue = ref<number>(0)
 let watcherInitialized = false
 
-// Smooth dimmer interpolation
-let dimmerTarget = 100
-let dimmerCurrent = 100
-let dimmerAnimationFrame: number | null = null
-const DIMMER_SMOOTHING = 0.9 // Lower = smoother/slower (0-1)
-
-// Validate a mapping has all required fields
 function isValidMapping(m: any): m is MIDIMapping {
   return m &&
     typeof m.id === 'string' &&
@@ -84,50 +50,16 @@ function isValidMapping(m: any): m is MIDIMapping {
     m.action && typeof m.action.type === 'string'
 }
 
-// Smooth dimmer animation using requestAnimationFrame
-function smoothDimmer(player: ReturnType<typeof useSetPlayer>) {
-  if (dimmerAnimationFrame) {
-    cancelAnimationFrame(dimmerAnimationFrame)
-  }
-
-  function animate() {
-    const diff = dimmerTarget - dimmerCurrent
-    if (Math.abs(diff) < 0.5) {
-      // Close enough, snap to target
-      dimmerCurrent = dimmerTarget
-      player.setMasterDimmer(Math.round(dimmerCurrent))
-      dimmerAnimationFrame = null
-      return
-    }
-
-    // Lerp towards target
-    dimmerCurrent += diff * DIMMER_SMOOTHING
-    player.setMasterDimmer(Math.round(dimmerCurrent))
-    dimmerAnimationFrame = requestAnimationFrame(animate)
-  }
-
-  dimmerAnimationFrame = requestAnimationFrame(animate)
-}
-
-// Load from storage on init
 function loadMappings() {
   if (typeof window === 'undefined') return
-
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
     if (stored) {
       const parsed = JSON.parse(stored)
-      // Filter out invalid mappings
       const valid = Array.isArray(parsed) ? parsed.filter(isValidMapping) : []
-      if (valid.length > 0) {
-        mappings.value = valid
-      } else {
-        // All invalid or empty: use defaults
-        mappings.value = [...DEFAULT_MAPPINGS]
-        saveMappings()
-      }
+      mappings.value = valid.length > 0 ? valid : [...DEFAULT_MAPPINGS]
+      if (valid.length === 0) saveMappings()
     } else {
-      // First time: use defaults
       mappings.value = [...DEFAULT_MAPPINGS]
       saveMappings()
     }
@@ -139,37 +71,23 @@ function loadMappings() {
 
 function saveMappings() {
   if (typeof window === 'undefined') return
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(mappings.value))
-  } catch (e) {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(mappings.value)) } catch (e) {
     console.warn('[MIDIMapper] Failed to save mappings:', e)
   }
 }
 
-// Initialize
 loadMappings()
-
-// ═══════════════════════════════════════════════════════════════
-// COMPOSABLE
-// ═══════════════════════════════════════════════════════════════
 
 export function useMIDIMapper() {
   const midi = useMIDI()
-  const player = useSetPlayer()
-  const appMode = useAppMode()
-  const store = useDMXStore()
+  const { dispatchAction } = useInputActions()
 
-  // Watch for MIDI events and process them (only initialize once)
   if (!watcherInitialized) {
     watcherInitialized = true
-    console.log('[MIDIMapper] Setting up MIDI event watcher')
 
     watch(() => midi.lastEvent.value, (event) => {
       if (!event) return
 
-      console.log('[MIDIMapper] Event received:', event.type, 'note:', event.note, 'cc:', event.cc, 'vel:', event.velocity, 'val:', event.value, 'ch:', event.channel)
-
-      // Handle learning mode
       if (isLearning.value && learningCallback.value) {
         if (event.type === 'cc' || event.type === 'noteon') {
           learningCallback.value({
@@ -180,178 +98,41 @@ export function useMIDIMapper() {
           isLearning.value = false
           learningCallback.value = null
         }
-        return // Don't process mapping while learning
+        return
       }
 
-      // Find matching mapping
       const mapping = findMapping(event)
-      console.log('[MIDIMapper] Mapping found:', mapping?.name || 'none')
+      if (!mapping) return
 
-      if (mapping) {
-        const value = event.value ?? event.velocity ?? 127
-        lastTriggeredMappingId.value = mapping.id
-        lastTriggeredValue.value = value
-        executeAction(mapping.action, value)
+      const raw = event.value ?? event.velocity ?? 127
+      lastTriggeredMappingId.value = mapping.id
+      lastTriggeredValue.value = raw
 
-        // Clear triggered indicator after a short delay (for notes)
-        if (mapping.midiType === 'note') {
-          setTimeout(() => {
-            if (lastTriggeredMappingId.value === mapping.id) {
-              lastTriggeredMappingId.value = null
-            }
-          }, 200)
-        }
+      // Normalize 0-127 -> 0..1 for the shared dispatcher
+      dispatchAction(mapping.action, raw / 127)
+
+      if (mapping.midiType === 'note') {
+        setTimeout(() => {
+          if (lastTriggeredMappingId.value === mapping.id) lastTriggeredMappingId.value = null
+        }, 200)
       }
     })
   }
 
-  // Find mapping for event
   function findMapping(event: typeof midi.lastEvent.value): MIDIMapping | null {
     if (!event) return null
-
     return mappings.value.find(m => {
-      // Match type - for notes, only match noteon (key press), ignore noteoff (key release)
       if (m.midiType === 'cc' && event.type !== 'cc') return false
       if (m.midiType === 'note' && event.type !== 'noteon') return false
-
-      // Match number
       const eventNumber = event.type === 'cc' ? event.cc : event.note
       if (m.midiNumber !== eventNumber) return false
-
-      // Match channel
       if (m.channel !== event.channel) return false
-
       return true
     }) || null
   }
 
-  // Execute action
-  function executeAction(action: MIDIAction, value: number) {
-    console.log('[MIDIMapper] Execute:', action.type, 'value:', value)
-
-    switch (action.type) {
-      case 'master:dimmer':
-        // Map 0-127 to 0-100 with smooth interpolation
-        dimmerTarget = Math.round((value / 127) * 100)
-        smoothDimmer(player)
-        break
-
-      case 'master:blackout':
-        // Only trigger on note-on (value > 0)
-        if (value > 0) {
-          appMode.toggleBlackout()
-        }
-        break
-
-      case 'transport:play':
-        if (value > 0) {
-          // Unified playback - handles both player and internal tempo
-          if (player.isPlaying.value) {
-            player.stop()
-            // Also stop internal tempo in testing mode
-            if (appMode.isTestingMode.value && appMode.internalPlaying.value) {
-              appMode.toggleInternalPlayback()
-            }
-          } else {
-            player.play()
-            // Also start internal tempo in testing mode
-            if (appMode.isTestingMode.value && !appMode.internalPlaying.value) {
-              appMode.toggleInternalPlayback()
-            }
-          }
-        }
-        break
-
-      case 'transport:stop':
-        if (value > 0) {
-          player.stop()
-          // Also stop internal tempo
-          if (appMode.internalPlaying.value) {
-            appMode.stopInternalPlayback()
-          }
-        }
-        break
-
-      case 'transport:tap':
-        if (value > 0) {
-          appMode.tapTempo()
-        }
-        break
-
-      case 'set:next':
-        if (value > 0) {
-          nextSet()
-        }
-        break
-
-      case 'set:prev':
-        if (value > 0) {
-          prevSet()
-        }
-        break
-
-      case 'set:direct':
-        // Quick set button - activate specific set by ID
-        if (value > 0 && action.setId) {
-          store.selectSet(action.setId)
-          player.setActiveSet(action.setId)
-        }
-        break
-
-      case 'set:activate':
-        // Activate the selected/viewed set (same as "Set Active" button)
-        if (value > 0) {
-          const setId = action.setId || store.selectedSet.value?.id
-          if (setId) {
-            player.setActiveSet(setId)
-          }
-        }
-        break
-
-      case 'set:trigger':
-        // Activate AND start playing (selected set or specific setId)
-        if (value > 0) {
-          const setId = action.setId || store.selectedSet.value?.id
-          if (setId) {
-            player.setActiveSet(setId)
-            player.play()
-            // Also start internal tempo in testing mode
-            if (appMode.isTestingMode.value && !appMode.internalPlaying.value) {
-              appMode.toggleInternalPlayback()
-            }
-          }
-        }
-        break
-    }
-  }
-
-  // Navigate sets - changes the selected/viewed set (use set:activate to make it active)
-  function nextSet() {
-    const allSets = store.sets.value
-    if (allSets.length === 0) return
-
-    const currentId = store.selectedSet.value?.id
-    const currentIndex = currentId ? allSets.findIndex(s => s.id === currentId) : -1
-    const nextIndex = (currentIndex + 1) % allSets.length
-    store.selectSet(allSets[nextIndex].id)
-  }
-
-  function prevSet() {
-    const allSets = store.sets.value
-    if (allSets.length === 0) return
-
-    const currentId = store.selectedSet.value?.id
-    const currentIndex = currentId ? allSets.findIndex(s => s.id === currentId) : 0
-    const prevIndex = currentIndex <= 0 ? allSets.length - 1 : currentIndex - 1
-    store.selectSet(allSets[prevIndex].id)
-  }
-
-  // Mapping CRUD
   function addMapping(mapping: Omit<MIDIMapping, 'id'>) {
-    const newMapping: MIDIMapping = {
-      ...mapping,
-      id: `mapping-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-    }
+    const newMapping: MIDIMapping = { ...mapping, id: `mapping-${Date.now()}-${Math.random().toString(36).slice(2, 7)}` }
     mappings.value.push(newMapping)
     saveMappings()
     return newMapping
@@ -380,7 +161,6 @@ export function useMIDIMapper() {
     saveMappings()
   }
 
-  // Learning mode
   function startLearning(callback: (event: { type: 'cc' | 'note', number: number, channel: number }) => void) {
     isLearning.value = true
     learningCallback.value = callback
@@ -391,25 +171,24 @@ export function useMIDIMapper() {
     learningCallback.value = null
   }
 
+  // Back-compat: callers passing raw 0-127
+  function executeAction(action: MIDIAction, value: number) {
+    dispatchAction(action, value / 127)
+  }
+
   return {
-    // State
     mappings,
     isLearning,
     lastTriggeredMappingId,
     lastTriggeredValue,
-
-    // CRUD
+    connected: midi.isConnected,
     addMapping,
     updateMapping,
     deleteMapping,
     loadDefaults,
     clearAll,
-
-    // Learning
     startLearning,
     cancelLearning,
-
-    // Utils
     executeAction,
   }
 }
