@@ -1,8 +1,12 @@
 # DMX App - Claude Context
 
+## Hard Constraints (do not violate)
+- NEVER modify the ESP32/Arduino firmware in `serial/` (`serial/dmx_beat/`). It is "left for later" and out of scope. Frontend changes only unless explicitly told otherwise.
+- The dev server runs on port **3010** (never 3000). Configured in `front/nuxt.config.ts` (`devServer.port`).
+
 ## Project Structure
 - `front/` - Nuxt 4 frontend (Vue 3, TypeScript)
-- `serial/dmx_beat/` - ESP32 Arduino firmware (FFT + DMX output)
+- `serial/dmx_beat/` - ESP32 Arduino firmware (FFT + DMX output) -- OUT OF SCOPE, do not edit
 
 ## Key Composables
 
