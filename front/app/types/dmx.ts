@@ -1,4 +1,16 @@
 // ═══════════════════════════════════════════════════════════════
+// SPATIAL (for the 3D visualizer / virtual stage)
+// ═══════════════════════════════════════════════════════════════
+export interface Vec3 {
+  x: number
+  y: number
+  z: number
+}
+
+// Visual archetype, drives how the 3D visualizer draws a fixture
+export type FixtureType = 'pinspot' | 'par' | 'strobe' | 'moving-head' | 'laser'
+
+// ═══════════════════════════════════════════════════════════════
 // DEVICE PROFILE (template for a type of fixture)
 // ═══════════════════════════════════════════════════════════════
 export interface ChannelRange {
@@ -26,6 +38,8 @@ export interface DeviceProfile {
   channelCount: number
   channels: ChannelDefinition[]
   controlType: ProfileControlType  // Determines UI: color pads vs sliders
+  fixtureType?: FixtureType        // Visual archetype for the 3D visualizer
+  beamAngle?: number               // Cone half-angle in degrees (for the beam render)
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -37,6 +51,10 @@ export interface Device {
   profileId: string               // Reference to DeviceProfile
   startChannel: number            // DMX address (1-512)
   tags: string[]                  // For filtering/organization
+  // Spatial layout for the 3D visualizer (room-space, meters / Euler degrees).
+  // Optional -> fully backward compatible with stored v3 data; auto-placed when absent.
+  position?: Vec3                  // x: left-right, y: up, z: depth (toward audience)
+  rotation?: Vec3                  // Euler degrees; aim direction of the fixture
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -48,6 +66,21 @@ export interface Group {
   profileId: string               // All devices MUST share same profile
   deviceIds: string[]             // Devices in this group
   color: string                   // UI color for track identification
+}
+
+// ═══════════════════════════════════════════════════════════════
+// STAGE (virtual room for the 3D visualizer)
+// ═══════════════════════════════════════════════════════════════
+export interface Stage {
+  width: number                   // X span in meters (left-right)
+  depth: number                   // Z span in meters (front-back)
+  height: number                  // Y span in meters (floor-ceiling)
+}
+
+export const DEFAULT_STAGE: Stage = {
+  width: 6,
+  depth: 4,
+  height: 5, // taller room: lets fixtures hang high so beams read as long tubes
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -120,6 +153,7 @@ export interface Scene {
   id: string
   name: string
   length: SetLength                // Beat length of the scene template
+  subdivision?: number            // Grid resolution to restore (so half-beat clips survive a roundtrip)
   tracks: SceneTrack[]            // Track definitions
   clips: SceneClip[]              // Clip placements
 }
@@ -143,8 +177,8 @@ export interface SetClip {
   id: string
   trackId: string
   presetId: string                // The preset to apply
-  startBeat: number               // Position in beats (0-indexed)
-  duration: number                // Length in beats
+  startBeat: number               // Position in beats, 1-indexed. May be fractional (1, 1.5, ...) when the set subdivision > 1.
+  duration: number                // Length in beats. May be fractional (e.g. 0.5) at higher subdivisions.
   // Future: fadeIn, fadeOut, endPresetId
 }
 
@@ -152,9 +186,14 @@ export interface Set {
   id: string
   name: string
   length: SetLength               // Total beats: 1, 2, 4, 8, 16, 32
+  subdivision?: number            // Steps per beat for the grid (1 = beats, 2 = half-beats). Default 1. Same length/BPM, finer grid.
+  tags?: string[]                 // Section tags (Intro/Buildup/Drop...) for Perform filtering
   tracks: SetTrack[]              // Vertical lanes
   clips: SetClip[]                // Clips placed on timeline
 }
+
+// Predefined EDM section tags (free-text custom tags also allowed).
+export const SET_SECTION_TAGS = ['Intro', 'Buildup', 'Drop', 'FX', 'Breakdown', 'Variation', 'Mid'] as const
 
 // ═══════════════════════════════════════════════════════════════
 // PLAYLIST (ordered Sets queue - like Spotify)
@@ -180,6 +219,8 @@ export const PINSPOT_RGBW: DeviceProfile = {
   name: 'PinSpot 15W RGBW',
   channelCount: 5,
   controlType: 'rgbw',
+  fixtureType: 'pinspot',
+  beamAngle: 7, // tight "tube" beam (pinspots are narrow); was 12 = too splayed
   channels: [
     {
       offset: 0,
@@ -207,6 +248,8 @@ export const LASER_10CH: DeviceProfile = {
   name: 'Laser 10ch',
   channelCount: 10,
   controlType: 'sliders',
+  fixtureType: 'laser',
+  beamAngle: 4,
   channels: [
     { offset: 0, name: 'Mode', type: 'other', min: 0, max: 255, defaultValue: 64, description: '0-63:OFF | 64-127:Manual | 128-191:Auto | 192-255:Sound' },
     { offset: 1, name: 'Pattern', type: 'other', min: 0, max: 255, defaultValue: 0, description: '51 patterns (0-255)' },
@@ -320,6 +363,8 @@ export function createDefaultSet(): Omit<Set, 'id'> {
   return {
     name: 'New Set',
     length: 8,
+    subdivision: 1,
+    tags: [],
     tracks: [],
     clips: [],
   }
@@ -341,29 +386,108 @@ export function createDefaultTrack(
   }
 }
 
+// ═══════════════════════════════════════════════════════════════
+// PINSPOT DIMMER/STROBE BANDS (channel 0 semantics) - single source of truth
+// Ch0: 0-8 off | 9-134 dimmer | 135-239 strobe (slow->fast) | 240-255 full
+// ═══════════════════════════════════════════════════════════════
+export const DMX_OFF_MAX = 8
+export const DIMMER_MIN = 9
+export const DIMMER_MAX = 134
+export const STROBE_MIN = 135
+export const STROBE_MAX = 239
+export const FULL_MIN = 240
+
+// Canonical strobe ch0 values per speed. Spans the 135-239 strobe band.
+// NOTE: tune against real PinSpot hardware - these are reasonable defaults, not measured.
+export const STROBE_DMX: Record<StrobeSpeed, number> = {
+  slow: 150,
+  medium: 190,
+  fast: 230,
+}
+
+// Convert a 0-255 logical dimmer into the pinspot 9-134 ch0 band.
+export function dimmerToCh0(dimmer: number): number {
+  return Math.round(DIMMER_MIN + (Math.max(0, Math.min(255, dimmer)) / 255) * (DIMMER_MAX - DIMMER_MIN))
+}
+
 // Convert PresetValues to DMX channel array (for PinSpot)
 export function valuesToDMX(values: PresetValues): number[] {
-  let ch0: number
+  const ch0 = values.strobe ? STROBE_DMX[values.strobeSpeed] : dimmerToCh0(values.dimmer)
+  return [ch0, values.red, values.green, values.blue, values.white]
+}
 
-  if (values.strobe) {
-    // Strobe mode: 135-239 range
-    switch (values.strobeSpeed) {
-      case 'slow':
-        ch0 = 150
-        break
-      case 'medium':
-        ch0 = 180
-        break
-      case 'fast':
-        ch0 = 220
-        break
+// ═══════════════════════════════════════════════════════════════
+// FIXTURE DECODE (pure) - turn a raw DMX frame into a renderable state.
+// The 3D visualizer AND hardware agree on this interpretation. It mirrors
+// the dimmer/strobe band logic used by the player's master-dimmer pass.
+// ═══════════════════════════════════════════════════════════════
+export interface FixtureState {
+  intensity01: number              // 0-1 overall brightness (the dimmer)
+  rgb: [number, number, number]    // 0-255 raw color channels
+  white: number                    // 0-255
+  strobe: boolean
+  strobeSpeed01: number            // 0 (slow) .. 1 (fast); 0 when not strobing
+  active: boolean                  // true if the fixture emits anything
+}
+
+export function decodeFixture(frame: number[], device: Device, profile: DeviceProfile): FixtureState {
+  const start = device.startChannel - 1
+  const ch = (offset: number): number => frame[start + offset] ?? 0
+
+  if (profile.controlType === 'rgbw') {
+    const ch0 = ch(0)
+    const r = ch(1), g = ch(2), b = ch(3), w = ch(4)
+
+    let intensity01 = 0
+    let strobe = false
+    let strobeSpeed01 = 0
+
+    if (ch0 >= STROBE_MIN && ch0 <= STROBE_MAX) {
+      strobe = true
+      strobeSpeed01 = (ch0 - STROBE_MIN) / (STROBE_MAX - STROBE_MIN)
+      intensity01 = 1 // in strobe mode the RGB channels carry the level
+    } else if (ch0 >= FULL_MIN) {
+      intensity01 = 1
+    } else if (ch0 >= DIMMER_MIN) {
+      intensity01 = (ch0 - DIMMER_MIN) / (DIMMER_MAX - DIMMER_MIN)
     }
-  } else {
-    // Dimmer mode: map 0-255 to 9-134
-    ch0 = Math.round(9 + (values.dimmer / 255) * 125)
+
+    const hasColor = r > 0 || g > 0 || b > 0 || w > 0
+    return {
+      intensity01,
+      rgb: [r, g, b],
+      white: w,
+      strobe,
+      strobeSpeed01,
+      active: intensity01 > 0 && (hasColor || strobe),
+    }
   }
 
-  return [ch0, values.red, values.green, values.blue, values.white]
+  // Non-RGBW (sliders, e.g. laser): best-effort representation.
+  // Derive a hue from a "Color" channel if present, intensity from any non-zero output.
+  const colorCh = profile.channels.find(c => c.name === 'Color')
+  const colorVal = colorCh ? ch(colorCh.offset) : 0
+  const [r, g, b] = hslToRgb((colorVal / 255) * 360, 0.8, 0.5)
+  const anyOutput = profile.channels.some(c => ch(c.offset) > 0)
+  return {
+    intensity01: anyOutput ? 1 : 0,
+    rgb: [r, g, b],
+    white: 0,
+    strobe: false,
+    strobeSpeed01: 0,
+    active: anyOutput,
+  }
+}
+
+// Small HSL->RGB (0-255) helper for non-RGBW fixture color approximation.
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+  h = ((h % 360) + 360) % 360 / 360
+  const a = s * Math.min(l, 1 - l)
+  const f = (n: number) => {
+    const k = (n + h * 12) % 12
+    return l - a * Math.max(-1, Math.min(k - 3, 9 - k, 1))
+  }
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)]
 }
 
 // Get preview color from values (for UI display)
