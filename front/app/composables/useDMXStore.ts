@@ -1,12 +1,13 @@
-import { ref, computed, watch } from 'vue'
+import { ref, computed, watch, toRaw } from 'vue'
 import type {
   DeviceProfile, Device, Group, Preset, Scene, SceneTrack, SceneClip,
-  Set, SetTrack, SetClip, Playlist, PresetValues, SetLength
+  Set, SetTrack, SetClip, Playlist, PresetValues, SetLength, Stage, Vec3
 } from '~/types/dmx'
 import {
-  DEVICE_PROFILES, BUILT_IN_PRESETS, TRACK_COLORS,
-  generateId, createDefaultSet, createDefaultTrack, valuesToDMX, getProfileById, presetToChannels
+  DEVICE_PROFILES, BUILT_IN_PRESETS, TRACK_COLORS, DEFAULT_STAGE, STROBE_DMX,
+  generateId, createDefaultSet, getProfileById, presetToChannels, dimmerToCh0
 } from '~/types/dmx'
+import { VJ_PRESETS, VJ_SET_NAMES, LEGACY_VJ_SET_NAMES, buildVjSetPack } from '~/lib/vjSetPack'
 import { masterDimmer } from './useSetPlayer'
 
 const STORAGE_KEY = 'dmx-store-v3'
@@ -21,6 +22,20 @@ const presets = ref<Preset[]>([...BUILT_IN_PRESETS]) // Start with built-in
 const scenes = ref<Scene[]>([])
 const sets = ref<Set[]>([])
 const playlists = ref<Playlist[]>([])
+
+// Virtual stage/room for the 3D visualizer
+const stage = ref<Stage>({ ...DEFAULT_STAGE })
+
+// Keep room dimensions sane (meters). Guards against bad/stale stored values.
+function clampStage(s: Partial<Stage>): Stage {
+  const c = (v: number | undefined, lo: number, hi: number, def: number) =>
+    Math.max(lo, Math.min(hi, typeof v === 'number' && Number.isFinite(v) ? v : def))
+  return {
+    width: c(s.width, 2, 30, DEFAULT_STAGE.width),
+    depth: c(s.depth, 2, 30, DEFAULT_STAGE.depth),
+    height: c(s.height, 2, 15, DEFAULT_STAGE.height),
+  }
+}
 
 // Selection state
 const selectedDeviceId = ref<string | null>(null)
@@ -47,8 +62,10 @@ const currentDMXState = ref<number[]>(new Array(100).fill(0))
 // ═══════════════════════════════════════════════════════════════
 // STORAGE
 // ═══════════════════════════════════════════════════════════════
-function loadFromStorage() {
-  if (typeof window === 'undefined') return
+// Returns true if a saved payload existed (so the caller can tell "fresh install"
+// apart from "user intentionally emptied everything" and not re-seed the latter).
+function loadFromStorage(): boolean {
+  if (typeof window === 'undefined') return false
 
   try {
     const stored = localStorage.getItem(STORAGE_KEY)
@@ -60,27 +77,43 @@ function loadFromStorage() {
       const userPresets = (data.presets || []).filter((p: Preset) => !p.isBuiltIn)
       presets.value = [...BUILT_IN_PRESETS, ...userPresets]
       scenes.value = data.scenes || []
-      sets.value = data.sets || []
+      // Per-set defaulting for fields added after v3 (no migration layer exists):
+      // old stored sets lack subdivision/tags, which would yield NaN/crash on read.
+      sets.value = (data.sets || []).map((s: Set) => ({
+        ...s,
+        subdivision: s.subdivision ?? 1,
+        tags: s.tags ?? [],
+      }))
       playlists.value = data.playlists || []
       activeSetId.value = data.activeSetId || null
+      if (data.stage) stage.value = clampStage(data.stage)
+      // Persist the normalized state so clamped/migrated values stick even
+      // before the auto-save watch is registered.
+      saveToStorage()
+      return true
     }
   } catch (e) {
     console.error('[DMXStore] Failed to load from storage:', e)
   }
+  return false
 }
 
 function saveToStorage() {
   if (typeof window === 'undefined') return
 
   try {
+    // Serialize from the RAW objects, not the reactive proxies: stringify over
+    // proxies pays a trap on every property access (hundreds of thousands for
+    // a full set pack), which shows up as a main-thread freeze mid-performance.
     const data = {
-      devices: devices.value,
-      groups: groups.value,
-      presets: presets.value.filter(p => !p.isBuiltIn), // Only save user presets
-      scenes: scenes.value,
-      sets: sets.value,
-      playlists: playlists.value,
+      devices: toRaw(devices.value),
+      groups: toRaw(groups.value),
+      presets: toRaw(presets.value).filter(p => !p.isBuiltIn), // Only save user presets
+      scenes: toRaw(scenes.value),
+      sets: toRaw(sets.value),
+      playlists: toRaw(playlists.value),
       activeSetId: activeSetId.value,
+      stage: toRaw(stage.value),
     }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
   } catch (e) {
@@ -88,14 +121,54 @@ function saveToStorage() {
   }
 }
 
+// Debounced save: coalesce bursts (paint strokes, pack loads, live tweaks)
+// into one write. flushSave() runs a pending save NOW - wired to pagehide so
+// a debounce window can't lose the last change on refresh/close.
+let saveTimer: ReturnType<typeof setTimeout> | null = null
+function scheduleSave() {
+  if (typeof window === 'undefined') return
+  if (saveTimer) clearTimeout(saveTimer)
+  saveTimer = setTimeout(() => {
+    saveTimer = null
+    saveToStorage()
+  }, 400)
+}
+function flushSave() {
+  if (!saveTimer) return
+  clearTimeout(saveTimer)
+  saveTimer = null
+  saveToStorage()
+}
+
+// Auto-save: ONE module-level watcher for the whole app. This used to live
+// inside useDMXStore(), so EVERY component calling the composable registered
+// its own deep watcher over the entire store graph - one mutation then cost
+// N full traversals of every set/clip/preset (~700ms main-thread freezes on
+// set activation, frozen beat counter). Registered once here instead.
+let autoSaveRegistered = false
+function registerAutoSave() {
+  if (autoSaveRegistered || typeof window === 'undefined') return
+  autoSaveRegistered = true
+  watch([devices, groups, presets, scenes, sets, playlists, activeSetId, stage], scheduleSave, { deep: true })
+  window.addEventListener('pagehide', flushSave)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') flushSave()
+  })
+}
+
 export function useDMXStore() {
   // Initialize on first use
   if (devices.value.length === 0 && sets.value.length === 0 && typeof window !== 'undefined') {
-    loadFromStorage()
+    const hadStoredData = loadFromStorage()
+    // Seed a starter rig + demo set ONLY on a truly fresh install (no storage
+    // key). If the user deliberately emptied everything, leave it empty.
+    if (!hadStoredData) {
+      seedDefaults()
+    }
   }
 
-  // Auto-save on changes
-  watch([devices, groups, presets, scenes, sets, playlists, activeSetId], saveToStorage, { deep: true })
+  // Auto-save on changes (module-level singleton; see registerAutoSave)
+  registerAutoSave()
 
   // ═══════════════════════════════════════════════════════════════
   // COMPUTED
@@ -147,10 +220,34 @@ export function useDMXStore() {
   // ═══════════════════════════════════════════════════════════════
   // DEVICE CRUD
   // ═══════════════════════════════════════════════════════════════
+  // Auto-place a device on a tidy grid across the stage so it always renders
+  // somewhere sensible in 3D even if added without the stage editor.
+  function autoPlacePosition(index: number): Vec3 {
+    const s = stage.value
+    const perRow = Math.max(1, Math.min(8, Math.round(s.width)))
+    const col = index % perRow
+    const row = Math.floor(index / perRow)
+    return {
+      x: -s.width / 2 + (s.width / (perRow + 1)) * (col + 1),
+      y: Math.min(s.height - 0.3, 2.4),
+      z: -s.depth / 2 + 0.6 + row * 0.9,
+    }
+  }
+
   function addDevice(data: Omit<Device, 'id'>): Device {
     const device: Device = { id: generateId(), ...data }
+    if (!device.position) device.position = autoPlacePosition(devices.value.length)
     devices.value.push(device)
     return device
+  }
+
+  // Update only the spatial transform of a device (used by the 3D stage editor)
+  function updateDeviceTransform(id: string, transform: { position?: Vec3; rotation?: Vec3 }) {
+    updateDevice(id, transform)
+  }
+
+  function setStage(partial: Partial<Stage>) {
+    stage.value = clampStage({ ...stage.value, ...partial })
   }
 
   function updateDevice(id: string, data: Partial<Device>) {
@@ -353,14 +450,8 @@ export function useDMXStore() {
     const start = device.startChannel - 1
 
     // Apply to pinspot-rgbw-5ch profile
-    // CH1: Dimmer/Strobe
-    if (values.strobe) {
-      const strobeValues = { slow: 135, medium: 175, fast: 215 }
-      dmx[start + 0] = strobeValues[values.strobeSpeed]
-    } else {
-      // Map dimmer 0-255 to 9-134 range
-      dmx[start + 0] = Math.round(9 + (values.dimmer / 255) * (134 - 9))
-    }
+    // CH1: Dimmer/Strobe (shared constants - single source of truth in types/dmx.ts)
+    dmx[start + 0] = values.strobe ? STROBE_DMX[values.strobeSpeed] : dimmerToCh0(values.dimmer)
 
     // CH2-5: RGBW
     dmx[start + 1] = values.red
@@ -475,6 +566,7 @@ export function useDMXStore() {
       id: generateId(),
       name: sceneName,
       length: set.length,
+      subdivision: set.subdivision ?? 1,
       tracks: sceneTracks,
       clips: sceneClips,
     }
@@ -517,6 +609,7 @@ export function useDMXStore() {
     set.tracks.splice(0, set.tracks.length, ...newTracks)
     set.clips.splice(0, set.clips.length, ...newClips)
     set.length = scene.length
+    set.subdivision = scene.subdivision ?? 1 // restore grid resolution so half-beat clips stay reachable
 
     // Force reactivity by triggering the sets array
     const idx = sets.value.findIndex(s => s.id === setId)
@@ -536,6 +629,8 @@ export function useDMXStore() {
       id: generateId(),
       name: data?.name || defaults.name,
       length: data?.length || defaults.length,
+      subdivision: data?.subdivision ?? defaults.subdivision,
+      tags: data?.tags ?? defaults.tags,
       tracks: data?.tracks || defaults.tracks,
       clips: data?.clips || defaults.clips,
     }
@@ -846,6 +941,104 @@ export function useDMXStore() {
     return dmx
   }
 
+  // Channel spans a set actively CLAIMS at this beat (devices under an active,
+  // audible clip). The FX-pad overlay uses this as its opacity mask: a clip
+  // present = opaque (even painted black), no clip = base shows through.
+  function getSetActiveSpans(set: Set, beat: number): { start: number; count: number }[] {
+    const spans: { start: number; count: number }[] = []
+    const hasSolo = set.tracks.some(t => t.solo)
+
+    for (const clip of set.clips) {
+      if (beat < clip.startBeat || beat >= clip.startBeat + clip.duration) continue
+
+      const track = set.tracks.find(t => t.id === clip.trackId)
+      if (!track || track.muted) continue
+      if (hasSolo && !track.solo) continue
+      if (!getPreset(clip.presetId)) continue
+
+      for (const device of getTargetDevices(track.targetType, track.targetId)) {
+        const profile = getProfile(device.profileId)
+        spans.push({ start: device.startChannel - 1, count: profile?.channelCount ?? 5 })
+      }
+    }
+
+    return spans
+  }
+
+  // Seed a starter rig (4 PinSpots positioned in 3D) + a demo set with a color
+  // chase so the controller and 3D stage are immediately usable on first run.
+  function seedDefaults() {
+    const layout = [
+      { ch: 1, x: -2.25 },
+      { ch: 6, x: -0.75 },
+      { ch: 11, x: 0.75 },
+      { ch: 16, x: 2.25 },
+    ]
+    const ids = layout.map((l, i) => addDevice({
+      name: `Pinspot ${i + 1}`,
+      profileId: 'pinspot-rgbw-5ch',
+      startChannel: l.ch,
+      tags: ['pinspot'],
+      position: { x: l.x, y: 2.6, z: -1.4 },
+      rotation: { x: 55, y: 0, z: 0 },
+    }).id)
+
+    addGroup({ name: 'All Pinspots', profileId: 'pinspot-rgbw-5ch', deviceIds: [...ids], color: TRACK_COLORS[0]! })
+
+    const set = addSet({ name: 'Demo', length: 8 })
+    const colorBrushes = ['builtin-red', 'builtin-green', 'builtin-blue', 'builtin-white']
+    // Beats are 1-indexed (grid columns 1..length).
+    ids.forEach((id, i) => {
+      const track = addTrackToSet(set.id, 'device', id)
+      if (!track) return
+      // single-color chase across beats 1-4 (one fixture per beat)
+      addClipToSet(set.id, track.id, colorBrushes[i % colorBrushes.length]!, i + 1, 1)
+      // all fixtures strobe together on the beats 5-8 drop
+      addClipToSet(set.id, track.id, 'builtin-strobe-med', 5, 4)
+    })
+
+    selectSet(set.id)
+    setActiveSet(set.id)
+  }
+
+  // Load the curated "VJ Pack": 6 hand-built sets (2 Intro, 2 Buildup, 2 Drop)
+  // bound to the user's live pinspots. Idempotent: it (re)installs the pack
+  // palette and refreshes the 6 named sets rather than duplicating them.
+  function loadVjPack(): { ok: boolean; reason?: string; count: number } {
+    // Map fixtures 1..6 to the user's RGBW pinspots in DMX-address order, so the
+    // venue layout (1v4 / 2v5 / 3v6) lands on the right physical fixtures.
+    const fixtureIds = devices.value
+      .filter(d => getProfileById(d.profileId)?.controlType === 'rgbw')
+      .slice()
+      .sort((a, b) => a.startChannel - b.startChannel)
+      .map(d => d.id)
+
+    if (fixtureIds.length === 0) return { ok: false, reason: 'no-devices', count: 0 }
+
+    // Install the pack palette (idempotent by stable id).
+    for (const p of VJ_PRESETS) {
+      if (!presets.value.some(x => x.id === p.id)) presets.value.push({ ...p })
+    }
+
+    // Refresh, not duplicate: drop any prior pack sets (current + legacy names).
+    const packNames = new Set([...VJ_SET_NAMES, ...LEGACY_VJ_SET_NAMES])
+    sets.value = sets.value.filter(s => !packNames.has(s.name))
+
+    const built = buildVjSetPack(fixtureIds)
+    let firstId: string | null = null
+    for (const s of built) {
+      const created = addSet(s)
+      if (!firstId) firstId = created.id
+    }
+
+    if (firstId) {
+      selectSet(firstId)
+      setActiveSet(firstId)
+    }
+    saveToStorage()
+    return { ok: true, count: built.length }
+  }
+
   // Detect overlapping device control for UI warnings
   function getOverlappingDevices(set: Set, beat: number): Map<string, string[]> {
     const deviceTracks = new Map<string, string[]>() // deviceId -> trackNames[]
@@ -878,6 +1071,7 @@ export function useDMXStore() {
     scenes,
     sets,
     playlists,
+    stage,
     selectedDeviceId,
     selectedGroupId,
     selectedPresetId,
@@ -905,9 +1099,13 @@ export function useDMXStore() {
     // Device methods
     addDevice,
     updateDevice,
+    updateDeviceTransform,
     deleteDevice,
     selectDevice,
     getDevice,
+
+    // Stage / 3D
+    setStage,
 
     // Group methods
     addGroup,
@@ -952,6 +1150,7 @@ export function useDMXStore() {
     deleteSet,
     selectSet,
     setActiveSet,
+    loadVjPack,
 
     // Track methods
     addTrackToSet,
@@ -973,6 +1172,7 @@ export function useDMXStore() {
     getProfile,
     getTargetDevices,
     getSetDMX,
+    getSetActiveSpans,
     getActiveAudioReactiveSettings,
     getOverlappingDevices,
 
