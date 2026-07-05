@@ -2,8 +2,9 @@
 import { useDMXStore } from '~/composables/useDMXStore'
 import { useSetPlayer } from '~/composables/useSetPlayer'
 import { useClipDrag } from '~/composables/useClipDrag'
-import { getPresetDisplayColor } from '~/types/dmx'
+import { getPresetDisplayColor, SET_SECTION_TAGS } from '~/types/dmx'
 import type { SetClip, Preset } from '~/types/dmx'
+import { clampSubdivision } from '~/lib/beatMath'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from '@/components/ui/dialog'
 import { Button } from '@/components/ui/button'
 import { Label } from '@/components/ui/label'
@@ -57,11 +58,78 @@ function createNewSet() {
   showSetSelector.value = false
 }
 
-// Beat display
-const beatColumns = computed(() => {
-  if (!currentSet.value) return []
-  return Array.from({ length: currentSet.value.length }, (_, i) => i + 1)
+// Load the curated VJ pack (6 sets) bound to the user's pinspots.
+function loadVjPack() {
+  showSetSelector.value = false
+  const res = store.loadVjPack()
+  if (!res.ok) {
+    window.alert('Add at least one PinSpot fixture first (Stage tab), then load the VJ pack.')
+  }
+}
+
+// Grid resolution (steps per beat). 1 = beats, 2 = half-beats (rapid changes).
+const subdivision = computed(() => clampSubdivision(currentSet.value?.length ?? 8, currentSet.value?.subdivision))
+const cellMinWidth = computed(() => Math.round(60 / subdivision.value))
+
+// Grid cells: length * subdivision of them, each mapped to a fractional beat.
+const cells = computed(() => {
+  if (!currentSet.value) return [] as { index: number; beat: number; isBeatStart: boolean; label: number }[]
+  const sub = subdivision.value
+  const n = currentSet.value.length * sub
+  return Array.from({ length: n }, (_, i) => ({
+    index: i,
+    beat: 1 + i / sub,
+    isBeatStart: i % sub === 0,
+    label: Math.floor(i / sub) + 1,
+  }))
 })
+
+// The pencil resolution is an editor setting ONLY: it changes the grid/snap, it
+// does NOT rewrite clips. A 1/2 or 1/4 note survives switching to a coarser grid
+// (it just renders between grid lines); playback samples finely regardless.
+function setSubdivision(sub: number) {
+  if (!currentSet.value) return
+  store.updateSet(currentSet.value.id, { subdivision: clampSubdivision(currentSet.value.length, sub) })
+}
+
+// Section tags (Intro/Buildup/Drop... + custom) for Perform filtering.
+const sectionTags = SET_SECTION_TAGS
+const setTags = computed(() => currentSet.value?.tags ?? [])
+const customTag = ref('')
+function addTag(tag: string) {
+  if (!currentSet.value || !tag.trim()) return
+  const tags = currentSet.value.tags ?? []
+  if (!tags.includes(tag)) store.updateSet(currentSet.value.id, { tags: [...tags, tag] })
+}
+function removeTag(tag: string) {
+  if (!currentSet.value) return
+  store.updateSet(currentSet.value.id, { tags: (currentSet.value.tags ?? []).filter(t => t !== tag) })
+}
+function addCustomTag() {
+  addTag(customTag.value.trim())
+  customTag.value = ''
+}
+
+// Highlight the grid cell that currently CONTAINS the playhead.
+function isCurrentCell(beat: number): boolean {
+  if (!player.isPlaying.value) return false
+  const step = 1 / subdivision.value
+  const p = player.stepInSet.value
+  return p >= beat && p < beat + step
+}
+
+// Clips render absolutely on the track timeline (positioned by time), so any
+// fractional position/width is correct on whatever grid the pencil shows.
+function clipsForTrack(trackId: string) {
+  if (!currentSet.value) return []
+  return currentSet.value.clips.filter(c => c.trackId === trackId)
+}
+function clipLeftPct(clip: SetClip): number {
+  return ((clip.startBeat - 1) / (currentSet.value?.length || 8)) * 100
+}
+function clipWidthPct(clip: SetClip): number {
+  return (clip.duration / (currentSet.value?.length || 8)) * 100
+}
 
 // Add track dialog
 const showAddTrack = ref(false)
@@ -118,10 +186,22 @@ function getTrackTargetDeviceId(trackId: string): string | null {
   if (track.targetType === 'device') {
     return track.targetId
   } else {
-    // Group: return first device
+    // Group: first device that still exists (skip stale ids)
     const group = store.getGroup(track.targetId)
-    return group?.deviceIds[0] || null
+    return group?.deviceIds.find(id => store.getDevice(id)) || null
   }
+}
+
+// The profile a track controls. For groups this comes from the group itself,
+// so painting works even if the group's devices were removed/replaced.
+function getTrackProfileId(trackId: string): string | null {
+  if (!currentSet.value) return null
+  const track = currentSet.value.tracks.find(t => t.id === trackId)
+  if (!track) return null
+  if (track.targetType === 'device') {
+    return store.getDevice(track.targetId)?.profileId ?? null
+  }
+  return store.getGroup(track.targetId)?.profileId ?? null
 }
 
 // Handle track header click - select the track's device/group to show presets
@@ -171,7 +251,7 @@ function handlePresetSave(presetData: Omit<Preset, 'id'>) {
       presetEditorTrackId.value,
       newPreset.id,
       presetEditorBeat.value,
-      1
+      1 / subdivision.value
     )
   }
 
@@ -237,18 +317,17 @@ function handleCellClick(trackId: string, beat: number) {
     return
   }
 
+  const trackProfileId = getTrackProfileId(trackId)
+
   // PAINT MODE: Use active brush or fallback to legacy behavior
   if (store.activeBrushId.value) {
     const preset = store.getPreset(store.activeBrushId.value)
-    const deviceId = getTrackTargetDeviceId(trackId)
-    const device = deviceId ? store.getDevice(deviceId) : null
-
-    if (preset && device && preset.profileId === device.profileId) {
+    if (preset && trackProfileId && preset.profileId === trackProfileId) {
       if (existingClip) {
         // Replace existing clip with new preset
         store.deleteClip(currentSet.value.id, existingClip.id)
       }
-      store.addClipToSet(currentSet.value.id, trackId, store.activeBrushId.value, beat, 1)
+      store.addClipToSet(currentSet.value.id, trackId, store.activeBrushId.value, beat, 1 / subdivision.value)
       return
     }
   }
@@ -256,14 +335,11 @@ function handleCellClick(trackId: string, beat: number) {
   // Legacy fallback: use selectedPresetId if no active brush
   if (store.selectedPresetId.value) {
     const preset = store.getPreset(store.selectedPresetId.value)
-    const deviceId = getTrackTargetDeviceId(trackId)
-    const device = deviceId ? store.getDevice(deviceId) : null
-
-    if (preset && device && preset.profileId === device.profileId) {
+    if (preset && trackProfileId && preset.profileId === trackProfileId) {
       if (existingClip) {
         store.deleteClip(currentSet.value.id, existingClip.id)
       }
-      store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1)
+      store.addClipToSet(currentSet.value.id, trackId, store.selectedPresetId.value, beat, 1 / subdivision.value)
       return
     }
   }
@@ -276,27 +352,20 @@ function handleCellClick(trackId: string, beat: number) {
   }
 }
 
-// Get clip at specific beat
-function getClipAtBeat(trackId: string, beat: number) {
-  if (!currentSet.value) return null
-  return currentSet.value.clips.find(
-    c => c.trackId === trackId && c.startBeat === beat
-  )
-}
-
-// Check if beat is covered by a clip (not start, but continuation)
-function isBeatCovered(trackId: string, beat: number) {
-  if (!currentSet.value) return false
-  return currentSet.value.clips.some(
-    c => c.trackId === trackId && beat > c.startBeat && beat < c.startBeat + c.duration
-  )
-}
-
-// Handle clip mousedown for drag
+// Handle clip mousedown for drag (or erase, in erase mode)
 function handleClipMouseDown(event: MouseEvent, clip: SetClip) {
+  if (store.toolMode.value === 'erase') {
+    if (currentSet.value) store.deleteClip(currentSet.value.id, clip.id)
+    return
+  }
   const target = event.currentTarget as HTMLElement
   const mode = clipDrag.getClipCursor(event, target)
-  clipDrag.startDrag(clip, mode, event, BEAT_WIDTH)
+  // Measure the real timeline width so drag snapping matches the rendered grid
+  // (cells flex-stretch, so a fixed BEAT_WIDTH would be wrong).
+  const timeline = target.closest('.beat-cells') as HTMLElement | null
+  const len = currentSet.value?.length || 8
+  const pxPerBeat = timeline && timeline.clientWidth ? timeline.clientWidth / len : BEAT_WIDTH
+  clipDrag.startDrag(clip, mode, event, pxPerBeat, subdivision.value)
 }
 
 // Get cursor style for clip
@@ -366,6 +435,9 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
           </button>
           <button class="set-option add-set" @click="createNewSet">
             + New Set
+          </button>
+          <button class="set-option load-vj" @click="loadVjPack">
+            ✨ Load VJ Pack (6 sets)
           </button>
         </div>
       </div>
@@ -457,6 +529,50 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
         <span class="brush-label">BRUSH:</span>
         <span class="brush-name">None selected</span>
       </div>
+
+      <div class="toolbar-divider" />
+
+      <!-- Grid resolution: same length/BPM, finer cells for rapid changes -->
+      <div class="grid-res" title="Cells per beat. 2x = half-beats for rapid changes; same length and BPM.">
+        <span class="grid-res-label">GRID</span>
+        <button class="res-btn" :class="{ active: subdivision === 1 }" @click="setSubdivision(1)">1x</button>
+        <button
+          class="res-btn"
+          :class="{ active: subdivision === 2 }"
+          :disabled="(currentSet?.length ?? 8) > 16"
+          @click="setSubdivision(2)"
+        >2x</button>
+        <button
+          class="res-btn"
+          :class="{ active: subdivision === 4 }"
+          :disabled="(currentSet?.length ?? 8) > 8"
+          @click="setSubdivision(4)"
+        >4x</button>
+        <span class="grid-res-hint">{{ subdivision === 4 ? '¼-beats' : subdivision === 2 ? '½-beats' : 'beats' }}</span>
+      </div>
+
+      <div class="toolbar-divider" />
+
+      <!-- Section tags (Intro/Buildup/Drop...) for Perform filtering -->
+      <div class="set-tags">
+        <span class="grid-res-label">TAGS</span>
+        <span v-for="t in setTags" :key="t" class="tag-chip">
+          {{ t }}<button class="tag-x" title="Remove tag" @click="removeTag(t)">×</button>
+        </span>
+        <select
+          class="tag-select"
+          @change="addTag(($event.target as HTMLSelectElement).value); ($event.target as HTMLSelectElement).value = ''"
+        >
+          <option value="">+ section</option>
+          <option v-for="t in sectionTags" :key="t" :value="t" :disabled="setTags.includes(t)">{{ t }}</option>
+        </select>
+        <input
+          v-model="customTag"
+          class="tag-input"
+          placeholder="custom"
+          @keyup.enter="addCustomTag"
+        >
+      </div>
     </div>
 
     <!-- Timeline Grid -->
@@ -465,12 +581,13 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
       <div class="beat-ruler">
         <div class="track-header-spacer" />
         <div
-          v-for="beat in beatColumns"
-          :key="beat"
+          v-for="cell in cells"
+          :key="cell.index"
           class="beat-number"
-          :class="{ 'current-beat-indicator': player.beatInSet.value === beat && player.isPlaying.value }"
+          :class="{ 'current-beat-indicator': isCurrentCell(cell.beat), 'sub-tick': !cell.isBeatStart }"
+          :style="{ minWidth: cellMinWidth + 'px' }"
         >
-          {{ beat }}
+          {{ cell.isBeatStart ? cell.label : '' }}
         </div>
       </div>
 
@@ -505,48 +622,58 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
               >
                 S
               </button>
+              <button
+                class="track-btn remove"
+                title="Remove track"
+                @click.stop="store.deleteTrack(currentSet.id, track.id)"
+              >
+                ×
+              </button>
             </div>
           </div>
 
-          <!-- Beat Cells -->
+          <!-- Timeline: paint-grid cells (snap targets) + absolute clips overlay -->
           <div class="beat-cells">
             <div
-              v-for="beat in beatColumns"
-              :key="beat"
+              v-for="cell in cells"
+              :key="cell.index"
               class="beat-cell"
               :class="{
-                'has-clip': getClipAtBeat(track.id, beat),
-                'clip-continuation': isBeatCovered(track.id, beat),
-                'current-beat-cell': player.beatInSet.value === beat && player.isPlaying.value,
+                'current-beat-cell': isCurrentCell(cell.beat),
+                'sub-cell': !cell.isBeatStart,
+                'beat-start': cell.isBeatStart,
               }"
-              @click="handleCellClick(track.id, beat)"
-            >
+              :style="{ minWidth: cellMinWidth + 'px' }"
+              @click="handleCellClick(track.id, cell.beat)"
+            />
+            <!-- Clips positioned by absolute time (survive any pencil resolution) -->
+            <div class="clips-overlay">
               <div
-                v-if="getClipAtBeat(track.id, beat)"
+                v-for="clip in clipsForTrack(track.id)"
+                :key="clip.id"
                 class="clip"
-                :class="{ dragging: clipDrag.isDragging.value && clipDrag.dragState.value?.clipId === getClipAtBeat(track.id, beat)!.id }"
+                :class="{ dragging: clipDrag.isDragging.value && clipDrag.dragState.value?.clipId === clip.id }"
                 :style="{
-                  backgroundColor: getClipColor(getClipAtBeat(track.id, beat)!.presetId),
-                  width: `calc(${getClipAtBeat(track.id, beat)!.duration * 100}% - 4px)`,
-                  cursor: getClipCursorStyle(getClipAtBeat(track.id, beat)!),
+                  left: clipLeftPct(clip) + '%',
+                  width: `calc(${clipWidthPct(clip)}% - 2px)`,
+                  backgroundColor: getClipColor(clip.presetId),
+                  cursor: getClipCursorStyle(clip),
                 }"
-                @mousedown.stop="handleClipMouseDown($event, getClipAtBeat(track.id, beat)!)"
+                @mousedown.stop="handleClipMouseDown($event, clip)"
                 @mousemove="handleClipMouseMove($event)"
-                @contextmenu="handleClipContextMenu($event, getClipAtBeat(track.id, beat)!, track.id)"
+                @contextmenu="handleClipContextMenu($event, clip, track.id)"
               >
-                <span class="clip-name">
-                  {{ store.getPreset(getClipAtBeat(track.id, beat)!.presetId)?.name }}
-                </span>
+                <span class="clip-name">{{ store.getPreset(clip.presetId)?.name }}</span>
                 <!-- Strobe/Dimmer/Audio indicators -->
                 <div class="clip-indicators">
-                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).audio" class="clip-indicator audio" title="Audio reactive">
-                    🎤{{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).audio }}
+                  <span v-if="getClipIndicators(clip.presetId).audio" class="clip-indicator audio" title="Audio reactive">
+                    🎤{{ getClipIndicators(clip.presetId).audio }}
                   </span>
-                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe" class="clip-indicator strobe">
-                    ⚡{{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).strobe }}
+                  <span v-if="getClipIndicators(clip.presetId).strobe" class="clip-indicator strobe">
+                    ⚡{{ getClipIndicators(clip.presetId).strobe }}
                   </span>
-                  <span v-if="getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).dimmer" class="clip-indicator dimmer">
-                    {{ getClipIndicators(getClipAtBeat(track.id, beat)!.presetId).dimmer }}
+                  <span v-if="getClipIndicators(clip.presetId).dimmer" class="clip-indicator dimmer">
+                    {{ getClipIndicators(clip.presetId).dimmer }}
                   </span>
                 </div>
                 <!-- Resize handles -->
@@ -835,6 +962,88 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   font-weight: 600;
 }
 
+/* Grid resolution selector */
+.grid-res {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.grid-res-label {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #555;
+  letter-spacing: 0.05em;
+}
+.res-btn {
+  min-width: 26px;
+  padding: 3px 7px;
+  font-size: 11px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  border-radius: 5px;
+  border: 1px solid #383944;
+  background: #22232b;
+  color: #888;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+.res-btn:hover:not(:disabled) { background: #2a2b35; color: #aaa; }
+.res-btn.active {
+  background: #22c55e18;
+  border-color: #22c55e60;
+  color: #22c55e;
+}
+.res-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+.grid-res-hint {
+  font-size: 9px;
+  font-family: 'JetBrains Mono', monospace;
+  color: #666;
+}
+
+/* Sub-beat ticks (the in-between half-beat cells) read fainter */
+.beat-number.sub-tick { color: #44485a; }
+
+/* Section tags */
+.set-tags {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 4px 2px 7px;
+  font-size: 10px;
+  font-weight: 600;
+  border-radius: 5px;
+  background: #6366f120;
+  border: 1px solid #6366f150;
+  color: #a5b4fc;
+}
+.tag-x {
+  border: none;
+  background: none;
+  color: #a5b4fc;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0 1px;
+}
+.tag-x:hover { color: #f87171; }
+.tag-select, .tag-input {
+  font-size: 10px;
+  padding: 2px 4px;
+  border-radius: 5px;
+  border: 1px solid #383944;
+  background: #22232b;
+  color: #aaa;
+  outline: none;
+}
+.tag-input { width: 64px; }
+.tag-input:focus, .tag-select:focus { border-color: #6366f160; }
+
 /* Header */
 .set-header {
   display: flex;
@@ -915,6 +1124,11 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
 .set-option.add-set {
   border-top: 1px solid #2a2b36;
   color: #22c55e;
+}
+
+.set-option.load-vj {
+  color: #a5b4fc;
+  font-weight: 600;
 }
 
 .set-controls {
@@ -1131,10 +1345,24 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   box-shadow: 0 0 10px #eab30850;
 }
 
+.track-btn.remove {
+  font-size: 14px;
+  line-height: 1;
+  color: #777;
+}
+
+.track-btn.remove:hover {
+  background: #ef444415;
+  border-color: #ef444450;
+  color: #ef4444;
+  box-shadow: 0 0 10px #ef444430;
+}
+
 /* Beat Cells */
 .beat-cells {
   flex: 1;
   display: flex;
+  position: relative; /* anchors the absolute clips overlay */
 }
 
 .beat-cell {
@@ -1155,6 +1383,11 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   background: transparent;
 }
 
+/* Beat boundary line (helps read 1/2 + 1/4 grids) */
+.beat-cell.beat-start {
+  border-left: 1px solid #353846;
+}
+
 .beat-cell:hover {
   background: #22c55e15;
 }
@@ -1164,15 +1397,18 @@ function handlePresetUpdate(presetData: Omit<Preset, 'id'>) {
   box-shadow: inset 0 0 0 1px #22c55e40, inset 0 0 20px #22c55e15;
 }
 
-.beat-cell.clip-continuation {
+/* Clips layer: overlays the cells, lets empty clicks reach the paint grid */
+.clips-overlay {
+  position: absolute;
+  inset: 0;
   pointer-events: none;
 }
 
-/* Clips - GLOWING LIGHT BLOCKS */
+/* Clips - GLOWING LIGHT BLOCKS (positioned absolutely by time) */
 .clip {
   position: absolute;
+  pointer-events: auto;
   top: 3px;
-  left: 2px;
   bottom: 3px;
   border-radius: 6px;
   display: flex;

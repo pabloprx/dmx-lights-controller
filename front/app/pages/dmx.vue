@@ -1,7 +1,11 @@
 <script setup lang="ts">
-const port = ref<SerialPort | null>(null)
-const writer = ref<WritableStreamDefaultWriter<Uint8Array> | null>(null)
-const isConnected = ref(false)
+// Raw DMX tester. Uses the SHARED serial singleton: a page-local SerialPort
+// leaked on navigate (this is an SPA - the port stayed open with no handle)
+// and permanently blocked the controller from connecting. One ESP32, one port.
+const serial = useUnifiedSerial()
+const { isConnected } = serial
+const connect = serial.connect
+const disconnect = serial.disconnect
 
 const dimmer = ref(255)
 const red = ref(255)
@@ -9,46 +13,9 @@ const green = ref(0)
 const blue = ref(0)
 const white = ref(0)
 
-async function connect() {
-  try {
-    const selectedPort = await navigator.serial.requestPort()
-    await selectedPort.open({ baudRate: 115200 })
-    port.value = selectedPort
-    writer.value = selectedPort.writable?.getWriter() || null
-    isConnected.value = true
-  } catch (e) {
-    console.error('Failed to connect:', e)
-  }
-}
-
-async function disconnect() {
-  if (writer.value) {
-    await writer.value.close()
-    writer.value = null
-  }
-  if (port.value) {
-    await port.value.close()
-    port.value = null
-  }
-  isConnected.value = false
-}
-
-async function sendDMX() {
-  if (!writer.value) return
-
-  // Build CSV: ch1,ch2,ch3,...,ch16
-  const channels = [
-    dimmer.value,  // CH1 - Dimmer
-    red.value,     // CH2 - Red
-    green.value,   // CH3 - Green
-    blue.value,    // CH4 - Blue
-    white.value,   // CH5 - White
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0  // CH6-16
-  ]
-
-  const line = channels.join(',') + '\n'
-  const encoder = new TextEncoder()
-  await writer.value.write(encoder.encode(line))
+function sendDMX() {
+  // First fixture only (ch1-5); the shared pump pads the frame to 100.
+  serial.sendDMX([dimmer.value, red.value, green.value, blue.value, white.value])
 }
 
 // Auto-send when values change

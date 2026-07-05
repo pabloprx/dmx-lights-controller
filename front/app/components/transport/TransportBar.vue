@@ -1,12 +1,9 @@
 <script setup lang="ts">
 import type { AudioBand } from '~/composables/useAudioReactive'
-import MIDIConfigModal from '~/components/midi/MIDIConfigModal.vue'
-import { useMIDIMapper } from '~/composables/useMIDIMapper'
+import InputConfigModal from '~/components/inputs/InputConfigModal.vue'
+import GamepadHint from '~/components/inputs/GamepadHint.vue'
 
 const { state: linkState, connected, connect: connectLink, disconnect: disconnectLink } = useAbletonLink()
-
-// Initialize MIDI mapper (activates event processing)
-useMIDIMapper()
 const {
   isConnected: serialConnected,
   connect: connectSerial,
@@ -33,6 +30,7 @@ const {
   setInternalTempo,
   stepBeat,
   tapTempo,
+  resyncBeat,
 } = useAppMode()
 const {
   isPlaying, play, stop, audioReactive,
@@ -160,21 +158,24 @@ function confirmExitPerformance() {
 
 <template>
   <div
-    class="flex items-center gap-5 px-4 py-3 bg-neutral-900 border-b-2 transition-colors"
-    :class="isPerformanceMode ? 'border-red-500' : 'border-neutral-6'"
+    class="flex flex-wrap items-center gap-x-4 gap-y-2 px-4 py-2.5 bg-neutral-900 border-b-2 transition-colors"
+    :class="isPerformanceMode ? 'border-red-500' : 'border-neutral-700'"
   >
     <!-- Play/Pause + BPM (shows Link in performance, internal in testing) -->
     <div class="flex items-center gap-3">
       <!-- Testing mode: internal playback controls -->
       <template v-if="isTestingMode">
-        <button
-          class="w-8 h-8 flex items-center justify-center rounded text-base cursor-pointer transition-colors"
-          :class="isPlaying ? 'bg-green-500 text-black hover:bg-green-400' : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'"
-          @click="togglePlayback"
-          title="Play/Stop set playback"
-        >
-          {{ isPlaying ? '⏸' : '▶' }}
-        </button>
+        <div class="relative">
+          <button
+            class="w-8 h-8 flex items-center justify-center rounded text-base cursor-pointer transition-colors"
+            :class="isPlaying ? 'bg-green-500 text-black hover:bg-green-400' : 'bg-neutral-800 text-neutral-500 hover:bg-neutral-700'"
+            @click="togglePlayback"
+            title="Play/Stop set playback"
+          >
+            {{ isPlaying ? '⏸' : '▶' }}
+          </button>
+          <span class="absolute -top-1.5 -right-1.5"><GamepadHint action="transport:play" /></span>
+        </div>
         <button
           class="w-8 h-8 flex items-center justify-center rounded text-sm bg-neutral-800 text-neutral-400 hover:bg-neutral-700 cursor-pointer"
           title="Step beat"
@@ -192,11 +193,18 @@ function confirmExitPerformance() {
         />
         <span class="text-neutral-500 text-sm">BPM</span>
         <button
-          class="px-2 py-1 rounded text-xs bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white cursor-pointer transition-colors"
+          class="px-2 py-1 rounded text-xs bg-neutral-800 text-neutral-400 hover:bg-neutral-700 hover:text-white cursor-pointer transition-colors inline-flex items-center gap-1"
           title="Tap to set BPM"
           @click="tapTempo"
         >
-          TAP
+          TAP <GamepadHint action="transport:tap" />
+        </button>
+        <button
+          class="px-2 py-1 rounded text-xs bg-neutral-800 text-sky-400 hover:bg-neutral-700 hover:text-sky-300 cursor-pointer transition-colors inline-flex items-center gap-1"
+          title="Beat sync - tap on the downbeat to re-align the beat to 1"
+          @click="resyncBeat"
+        >
+          SYNC <GamepadHint action="transport:beat-sync" />
         </button>
         <div class="text-neutral-600 text-xs font-mono ml-2">beat: {{ internalBeat }}</div>
       </template>
@@ -345,7 +353,7 @@ function confirmExitPerformance() {
 
     <!-- Master Dimmer -->
     <div class="master-dimmer">
-      <span class="text-[10px] text-zinc-500 uppercase font-semibold">Dim</span>
+      <span class="text-[10px] text-zinc-500 uppercase font-semibold inline-flex items-center gap-1">Dim <GamepadHint action="master:dimmer" /></span>
       <input
         type="range"
         :value="masterDimmer"
@@ -361,13 +369,13 @@ function confirmExitPerformance() {
       >{{ masterDimmer }}%</span>
     </div>
 
-    <!-- MIDI Config -->
+    <!-- Input Config (MIDI + Gamepad) -->
     <button
-      class="text-[10px] text-zinc-500 uppercase font-semibold hover:text-green-400 transition-colors px-2"
-      title="MIDI Configuration"
+      class="text-[10px] text-zinc-500 uppercase font-semibold hover:text-green-400 transition-colors px-2 whitespace-nowrap"
+      title="Input mapping (MIDI + Gamepad)"
       @click="showMIDIConfig = true"
     >
-      MIDI
+      INPUT
     </button>
 
     <div class="flex-1" />
@@ -405,7 +413,7 @@ function confirmExitPerformance() {
 
     <!-- Blackout Button -->
     <button
-      class="px-4 py-2 rounded font-bold text-sm transition-all"
+      class="px-4 py-2 rounded font-bold text-sm transition-all inline-flex items-center gap-1.5"
       :class="
         blackout
           ? 'bg-red-600 text-white ring-2 ring-red-400'
@@ -413,7 +421,7 @@ function confirmExitPerformance() {
       "
       @click="toggleBlackout"
     >
-      {{ blackout ? 'BLACKOUT' : 'BO' }}
+      {{ blackout ? 'BLACKOUT' : 'BO' }} <GamepadHint action="master:blackout" />
     </button>
 
     <!-- Status -->
@@ -608,8 +616,8 @@ function confirmExitPerformance() {
       </div>
     </Teleport>
 
-    <!-- MIDI Config Modal -->
-    <MIDIConfigModal
+    <!-- Input Config Modal (MIDI + Gamepad) -->
+    <InputConfigModal
       :open="showMIDIConfig"
       @update:open="showMIDIConfig = $event"
     />

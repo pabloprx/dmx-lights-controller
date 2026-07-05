@@ -1,5 +1,7 @@
 <script setup lang="ts">
-const { audioLevels, isConnected, connect, disconnect } = useAudioSerial()
+// Shared app-wide serial singleton (a page-local port would leak on navigate
+// and block the controller from connecting - one ESP32, one port).
+const { audioLevels, isConnected, connect, disconnect } = useUnifiedSerial()
 
 const maxHistory = 50
 const bassHistory = ref<number[]>([])

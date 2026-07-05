@@ -88,24 +88,14 @@ function toggleRight() {
   width: 240px;
   min-width: 240px;
   flex-direction: row;
-  /* Neon glow border */
-  border-right: 1px solid #22c55e30;
-  box-shadow:
-    1px 0 0 #22c55e20,
-    2px 0 20px #22c55e10,
-    inset -1px 0 0 #22c55e10;
+  border-right: 1px solid var(--border);
 }
 
 .panel-right {
   width: 280px;
   min-width: 280px;
   flex-direction: row-reverse;
-  /* Neon glow border */
-  border-left: 1px solid #22c55e30;
-  box-shadow:
-    -1px 0 0 #22c55e20,
-    -2px 0 20px #22c55e10,
-    inset 1px 0 0 #22c55e10;
+  border-left: 1px solid var(--border);
 }
 
 .panel.collapsed {

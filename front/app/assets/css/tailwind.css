@@ -84,35 +84,35 @@
      NEON STUDIO - Cyberpunk Lighting Console Theme
      ═══════════════════════════════════════════════════════════ */
 
-  /* Deep backgrounds - dark but not pure black for better visibility */
-  --background: #1a1b21;
-  --foreground: #f0f0f5;
+  /* Darker pro-console: deep neutral near-black, high contrast */
+  --background: #0a0b0d;
+  --foreground: #e9eaef;
 
   /* Panels - elevated surfaces */
-  --card: #22232b;
-  --card-foreground: #f0f0f5;
-  --popover: #2a2b35;
-  --popover-foreground: #f0f0f5;
+  --card: #131419;
+  --card-foreground: #e9eaef;
+  --popover: #16171d;
+  --popover-foreground: #e9eaef;
 
-  /* Primary - Neon Green (the power indicator) */
+  /* Primary - restrained signal green (go) */
   --primary: #22c55e;
-  --primary-foreground: #0a0a0f;
+  --primary-foreground: #06090a;
 
   /* Secondary/muted - cool grays */
-  --secondary: #1a1b24;
-  --secondary-foreground: #f0f0f5;
-  --muted: #12131a;
-  --muted-foreground: #8888a0;
+  --secondary: #0f1014;
+  --secondary-foreground: #e9eaef;
+  --muted: #0e0f13;
+  --muted-foreground: #82838f;
 
   /* Accent - for hover states */
-  --accent: #1e1f2a;
-  --accent-foreground: #f0f0f5;
+  --accent: #1a1c22;
+  --accent-foreground: #e9eaef;
 
   --destructive: #ef4444;
 
-  /* Borders - subtle with glow potential */
-  --border: #2a2b36;
-  --input: #1a1b24;
+  /* Borders - crisp, slightly brighter for contrast on near-black */
+  --border: #24262f;
+  --input: #1b1d24;
   --ring: #22c55e;
 
   /* Charts - neon palette */
