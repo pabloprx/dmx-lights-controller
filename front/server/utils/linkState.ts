@@ -6,7 +6,7 @@ interface AbletonLinkInstance {
   setTempo(tempo: number): void;
   getNumPeers(): number;
   getBeat(): number;
-  getPhase(): number;
+  getPhase(quantum: number): number;
   isPlaying(): boolean;
   setNumPeersCallback(cb: (numPeers: number) => void): void;
   setTempoCallback(cb: (tempo: number) => void): void;
