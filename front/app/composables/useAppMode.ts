@@ -11,8 +11,44 @@ const blackout = ref(false)
 const internalTempo = ref(120)
 const internalPlaying = ref(false)
 const internalBeat = ref(0)
+// Continuous fractional beat position (e.g. 2.5 = halfway through beat 3). Drives
+// sub-beat playback in testing mode. internalBeat stays the integer floor of this,
+// so every existing integer-beat consumer is unchanged.
+const internalBeatFloat = ref(0)
 
+// The internal clock ticks at MAX_SUB steps per beat so sub-beat clips (down to
+// 1/4 notes) fire in testing mode. Matches the fixed playback resolution.
+const MAX_SUB = 4
+let internalSubCounter = 0
 let internalInterval: ReturnType<typeof setInterval> | null = null
+// Wall-clock anchor for a SMOOTH intra-beat phase (the stepped subCounter only
+// has MAX_SUB values/beat, too coarse for the 3D pulse). Beat stepping still uses
+// the interval; this is read-only for visuals.
+let internalClockStartMs = 0
+
+function internalTick() {
+  internalSubCounter++
+  internalBeatFloat.value = internalSubCounter / MAX_SUB
+  internalBeat.value = Math.floor(internalBeatFloat.value)
+}
+function startTicker() {
+  internalClockStartMs = typeof performance !== 'undefined' ? performance.now() : 0
+  const msPerStep = 60000 / (internalTempo.value * MAX_SUB)
+  internalInterval = setInterval(internalTick, msPerStep)
+}
+function resetInternalClock() {
+  internalSubCounter = 0
+  internalBeatFloat.value = 0
+  internalBeat.value = 0
+}
+
+// Smooth 0..1 intra-beat phase from wall-clock (for the 3D beat-pulse ring).
+// Returns 0 when not running.
+function getInternalPhase(): number {
+  if (!internalPlaying.value || typeof performance === 'undefined') return 0
+  const msPerBeat = 60000 / internalTempo.value
+  return ((((performance.now() - internalClockStartMs) / msPerBeat) % 1) + 1) % 1
+}
 
 // Tap tempo state
 const tapTimes: number[] = []
@@ -74,17 +110,13 @@ export function useAppMode() {
     if (internalPlaying.value) return
 
     internalPlaying.value = true
-    internalBeat.value = 0
-
-    const msPerBeat = 60000 / internalTempo.value
-    internalInterval = setInterval(() => {
-      internalBeat.value++
-    }, msPerBeat)
+    resetInternalClock()
+    startTicker()
   }
 
   function stopInternalPlayback() {
     internalPlaying.value = false
-    internalBeat.value = 0
+    resetInternalClock()
     if (internalInterval) {
       clearInterval(internalInterval)
       internalInterval = null
@@ -102,16 +134,31 @@ export function useAppMode() {
   function setInternalTempo(bpm: number) {
     internalTempo.value = Math.max(20, Math.min(300, bpm))
 
-    // Restart interval if playing
-    if (internalPlaying.value) {
-      stopInternalPlayback()
-      startInternalPlayback()
+    // Restart ticker at the new rate (preserves current position so changing
+    // tempo mid-play does not jump the beat).
+    if (internalPlaying.value && internalInterval) {
+      clearInterval(internalInterval)
+      startTicker()
     }
   }
 
   // Step to next beat (manual mode)
   function stepBeat() {
-    internalBeat.value++
+    internalSubCounter += MAX_SUB
+    internalBeatFloat.value = internalSubCounter / MAX_SUB
+    internalBeat.value = Math.floor(internalBeatFloat.value)
+  }
+
+  // Beat sync / re-downbeat: snap the beat counter back to 1 and re-phase the
+  // tick so "1" lands on the moment you press it (tap this on the music's
+  // downbeat to line the lights up). In Link/performance mode the beat follows
+  // Link, so this only re-aligns the internal-tempo clock.
+  function resyncBeat() {
+    resetInternalClock()
+    if (internalPlaying.value && internalInterval) {
+      clearInterval(internalInterval)
+      startTicker()
+    }
   }
 
   // Tap tempo - calculate BPM from tap intervals
@@ -161,11 +208,14 @@ export function useAppMode() {
     internalTempo,
     internalPlaying: readonly(internalPlaying),
     internalBeat: readonly(internalBeat),
+    internalBeatFloat: readonly(internalBeatFloat),
+    getInternalPhase,
     startInternalPlayback,
     stopInternalPlayback,
     toggleInternalPlayback,
     setInternalTempo,
     stepBeat,
     tapTempo,
+    resyncBeat,
   }
 }

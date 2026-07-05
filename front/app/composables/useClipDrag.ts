@@ -12,6 +12,7 @@ interface DragState {
   originalStartBeat: number
   originalDuration: number
   beatWidth: number
+  subdivision: number
 }
 
 // Singleton state
@@ -26,7 +27,8 @@ export function useClipDrag() {
     clip: SetClip,
     mode: DragMode,
     event: MouseEvent,
-    beatWidth: number
+    beatWidth: number,
+    subdivision: number = 1
   ) {
     event.preventDefault()
     event.stopPropagation()
@@ -39,6 +41,7 @@ export function useClipDrag() {
       originalStartBeat: clip.startBeat,
       originalDuration: clip.duration,
       beatWidth,
+      subdivision: Math.max(1, subdivision),
     }
 
     // Add global listeners
@@ -50,10 +53,16 @@ export function useClipDrag() {
     if (!isDragging.value || !dragState.value) return
 
     const state = dragState.value
+    const sub = state.subdivision || 1
+    const step = 1 / sub // smallest grid increment (e.g. 0.5 beat at 2x)
     const deltaX = event.clientX - state.startX
-    const deltaBeat = Math.round(deltaX / state.beatWidth)
+    // Snap the drag to the sub-beat grid (so half-beat drags are possible and a
+    // zero-distance grab is a true no-op instead of snapping to whole beats).
+    const deltaBeat = Math.round((deltaX / state.beatWidth) * sub) / sub
 
-    const set = store.activeSet.value
+    // Operate on the SELECTED set (the one shown in the editor), not the playing
+    // one - otherwise drag/resize silently no-ops when they differ.
+    const set = store.selectedSet.value
     if (!set) return
 
     const clip = set.clips.find(c => c.id === state.clipId)
@@ -67,8 +76,7 @@ export function useClipDrag() {
       clip.startBeat = Math.min(newStart, maxStart)
     } else if (state.mode === 'resize-start') {
       // Resize from start - changes both start and duration
-      const newStart = Math.max(1, state.originalStartBeat + deltaBeat)
-      const maxDelta = state.originalDuration - 1 // Can't shrink below 1 beat
+      const maxDelta = state.originalDuration - step // Can't shrink below one step
       const actualDelta = Math.min(deltaBeat, maxDelta)
 
       if (state.originalStartBeat + actualDelta >= 1) {
@@ -77,7 +85,7 @@ export function useClipDrag() {
       }
     } else if (state.mode === 'resize-end') {
       // Resize from end - only changes duration
-      const newDuration = Math.max(1, state.originalDuration + deltaBeat)
+      const newDuration = Math.max(step, state.originalDuration + deltaBeat)
       // Ensure clip doesn't exceed set length
       const maxDuration = set.length - clip.startBeat + 1
       clip.duration = Math.min(newDuration, maxDuration)
@@ -116,7 +124,7 @@ export function useClipDrag() {
     duration: number,
     excludeClipId?: string
   ): boolean {
-    const set = store.activeSet.value
+    const set = store.selectedSet.value
     if (!set) return false
 
     // Check bounds
